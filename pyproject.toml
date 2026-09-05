@@ -9,6 +9,7 @@ dependencies = [
     "pandas>=2.0",
     "numpy>=1.26",
     "matplotlib>=3.8",
+    "prophet>=1.1",
 ]
 
 [project.optional-dependencies]
@@ -19,6 +20,9 @@ dev = [
     "nbclient>=0.10",
     "ipykernel>=6.29",
 ]
+
+[project.scripts]
+foresight-baseline-prophet = "foresight.baselines.prophet_baseline:main"
 
 [build-system]
 requires = ["setuptools>=68"]
