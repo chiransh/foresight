@@ -10,6 +10,8 @@ dependencies = [
     "numpy>=1.26",
     "matplotlib>=3.8",
     "prophet>=1.1",
+    "lightgbm>=4.0",
+    "scikit-learn>=1.4",
 ]
 
 [project.optional-dependencies]
@@ -23,6 +25,7 @@ dev = [
 
 [project.scripts]
 foresight-baseline-prophet = "foresight.baselines.prophet_baseline:main"
+foresight-baseline-lightgbm = "foresight.baselines.lightgbm_baseline:main"
 
 [build-system]
 requires = ["setuptools>=68"]
