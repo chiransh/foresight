@@ -6,7 +6,6 @@ store's history), open days only, matching how the Kaggle competition itself
 scores Rossmann submissions.
 """
 
-import json
 import sys
 from pathlib import Path
 
@@ -14,6 +13,7 @@ import numpy as np
 import pandas as pd
 from prophet import Prophet
 
+from foresight.baselines._runner import run_cli
 from foresight.config import HOLDOUT_DAYS, SAMPLE_STORES
 from foresight.metrics import mape, smape, wape
 
@@ -21,10 +21,18 @@ DATA_DIR = Path("data/raw")
 RESULTS_PATH = Path("evals/results/prophet.json")
 
 
-def _fit_and_evaluate(df: pd.DataFrame) -> dict | None:
-    cutoff = df.Date.max() - pd.Timedelta(days=HOLDOUT_DAYS)
-    train_df = df[df.Date <= cutoff]
-    test_df = df[df.Date > cutoff]
+def _fit_and_evaluate(
+    df: pd.DataFrame,
+    train_end: pd.Timestamp | None = None,
+    test_end: pd.Timestamp | None = None,
+) -> dict | None:
+    if train_end is None:
+        train_end = df.Date.max() - pd.Timedelta(days=HOLDOUT_DAYS)
+    if test_end is None:
+        test_end = df.Date.max()
+
+    train_df = df[df.Date <= train_end]
+    test_df = df[(df.Date > train_end) & (df.Date <= test_end)]
 
     if len(train_df) < 60 or len(test_df) == 0:
         return None
@@ -48,7 +56,12 @@ def _fit_and_evaluate(df: pd.DataFrame) -> dict | None:
     }
 
 
-def run(store_ids: list[int] = SAMPLE_STORES, data_dir: Path = DATA_DIR) -> dict:
+def run(
+    store_ids: list[int] = SAMPLE_STORES,
+    data_dir: Path = DATA_DIR,
+    train_end: pd.Timestamp | None = None,
+    test_end: pd.Timestamp | None = None,
+) -> dict:
     train = pd.read_csv(data_dir / "train.csv", parse_dates=["Date"], low_memory=False)
 
     per_store = {}
@@ -56,7 +69,7 @@ def run(store_ids: list[int] = SAMPLE_STORES, data_dir: Path = DATA_DIR) -> dict
         df = train[(train.Store == store_id) & (train.Open == 1)].sort_values("Date")
         df = df[["Date", "Sales", "Promo"]].reset_index(drop=True)
 
-        metrics = _fit_and_evaluate(df)
+        metrics = _fit_and_evaluate(df, train_end=train_end, test_end=test_end)
         print(f"store {store_id}: {metrics}", file=sys.stderr)
         if metrics is not None:
             per_store[store_id] = metrics
@@ -69,15 +82,7 @@ def run(store_ids: list[int] = SAMPLE_STORES, data_dir: Path = DATA_DIR) -> dict
 
 
 def main() -> None:
-    results = run()
-
-    RESULTS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    RESULTS_PATH.write_text(json.dumps(results, indent=2))
-
-    print(f"Prophet baseline, {len(results['per_store'])} stores")
-    for metric, value in results["overall"].items():
-        print(f"  {metric.upper()}: {value:.2f}")
-    print(f"Saved to {RESULTS_PATH}")
+    run_cli(run, "Prophet", RESULTS_PATH)
 
 
 if __name__ == "__main__":

@@ -7,13 +7,13 @@ Same store sample and same date-based holdout as the Prophet baseline, so
 the two are directly comparable.
 """
 
-import json
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 from lightgbm import LGBMRegressor
 
+from foresight.baselines._runner import run_cli
 from foresight.config import HOLDOUT_DAYS, SAMPLE_STORES
 from foresight.features import build_features
 from foresight.metrics import mape, smape, wape
@@ -63,14 +63,30 @@ def _load_data(data_dir: Path = DATA_DIR, store_ids: list[int] = SAMPLE_STORES) 
     return df.dropna(subset=LAG_ROLLING_COLS)
 
 
-def _split(df: pd.DataFrame, holdout_days: int = HOLDOUT_DAYS) -> tuple[pd.DataFrame, pd.DataFrame]:
-    cutoff = df.groupby("Store")["Date"].transform("max") - pd.Timedelta(days=holdout_days)
-    return df[df.Date <= cutoff], df[df.Date > cutoff]
+def _split(
+    df: pd.DataFrame,
+    holdout_days: int = HOLDOUT_DAYS,
+    train_end: pd.Timestamp | None = None,
+    test_end: pd.Timestamp | None = None,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    cutoff = (
+        train_end
+        if train_end is not None
+        else df.groupby("Store")["Date"].transform("max") - pd.Timedelta(days=holdout_days)
+    )
+    train_df = df[df.Date <= cutoff]
+    test_df = df[df.Date > cutoff] if test_end is None else df[(df.Date > cutoff) & (df.Date <= test_end)]
+    return train_df, test_df
 
 
-def run(store_ids: list[int] = SAMPLE_STORES, data_dir: Path = DATA_DIR) -> dict:
+def run(
+    store_ids: list[int] = SAMPLE_STORES,
+    data_dir: Path = DATA_DIR,
+    train_end: pd.Timestamp | None = None,
+    test_end: pd.Timestamp | None = None,
+) -> dict:
     df = _load_data(data_dir, store_ids)
-    train_df, test_df = _split(df)
+    train_df, test_df = _split(df, train_end=train_end, test_end=test_end)
 
     model = LGBMRegressor(n_estimators=300, learning_rate=0.05, num_leaves=31, random_state=42, verbosity=-1)
     model.fit(train_df[FEATURE_COLS], train_df["Sales"])
@@ -97,15 +113,7 @@ def run(store_ids: list[int] = SAMPLE_STORES, data_dir: Path = DATA_DIR) -> dict
 
 
 def main() -> None:
-    results = run()
-
-    RESULTS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    RESULTS_PATH.write_text(json.dumps(results, indent=2))
-
-    print(f"LightGBM baseline, {len(results['per_store'])} stores")
-    for metric, value in results["overall"].items():
-        print(f"  {metric.upper()}: {value:.2f}")
-    print(f"Saved to {RESULTS_PATH}")
+    run_cli(run, "LightGBM", RESULTS_PATH)
 
 
 if __name__ == "__main__":

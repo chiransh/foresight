@@ -8,7 +8,6 @@ other two baselines, so the comparison is fair. Run from the repo root:
 `python -m foresight.baselines.nhits_baseline`.
 """
 
-import json
 from pathlib import Path
 
 import numpy as np
@@ -16,6 +15,7 @@ import pandas as pd
 from neuralforecast import NeuralForecast
 from neuralforecast.models import NHITS
 
+from foresight.baselines._runner import run_cli
 from foresight.config import HOLDOUT_DAYS, SAMPLE_STORES
 from foresight.metrics import mape, smape, wape
 
@@ -38,13 +38,21 @@ def _load_long_df(data_dir: Path = DATA_DIR, store_ids: list[int] = SAMPLE_STORE
 
 
 def run(
-    store_ids: list[int] = SAMPLE_STORES, data_dir: Path = DATA_DIR, holdout_days: int = HOLDOUT_DAYS
+    store_ids: list[int] = SAMPLE_STORES,
+    data_dir: Path = DATA_DIR,
+    holdout_days: int = HOLDOUT_DAYS,
+    train_end: pd.Timestamp | None = None,
+    test_end: pd.Timestamp | None = None,
 ) -> dict:
     long_df = _load_long_df(data_dir, store_ids)
 
-    cutoff = long_df.groupby("unique_id")["ds"].transform("max") - pd.Timedelta(days=holdout_days)
+    cutoff = (
+        train_end
+        if train_end is not None
+        else long_df.groupby("unique_id")["ds"].transform("max") - pd.Timedelta(days=holdout_days)
+    )
     train_df = long_df[long_df.ds <= cutoff]
-    test_df = long_df[long_df.ds > cutoff]
+    test_df = long_df[long_df.ds > cutoff] if test_end is None else long_df[(long_df.ds > cutoff) & (long_df.ds <= test_end)]
 
     model = NHITS(
         h=holdout_days,
@@ -83,15 +91,7 @@ def run(
 
 
 def main() -> None:
-    results = run()
-
-    RESULTS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    RESULTS_PATH.write_text(json.dumps(results, indent=2))
-
-    print(f"NHITS baseline, {len(results['per_store'])} stores")
-    for metric, value in results["overall"].items():
-        print(f"  {metric.upper()}: {value:.2f}")
-    print(f"Saved to {RESULTS_PATH}")
+    run_cli(run, "NHITS", RESULTS_PATH)
 
 
 if __name__ == "__main__":

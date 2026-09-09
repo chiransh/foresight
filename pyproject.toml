@@ -28,6 +28,7 @@ dev = [
 foresight-baseline-prophet = "foresight.baselines.prophet_baseline:main"
 foresight-baseline-lightgbm = "foresight.baselines.lightgbm_baseline:main"
 foresight-baseline-nhits = "foresight.baselines.nhits_baseline:main"
+foresight-backtest = "foresight.backtest:main"
 
 [build-system]
 requires = ["setuptools>=68"]
