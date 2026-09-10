@@ -30,6 +30,7 @@ data/raw/*
 
 mlruns/
 mlflow.db
+mlartifacts/
 lightning_logs/
 
 *.log

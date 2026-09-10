@@ -46,6 +46,21 @@ RAW_COLS = ["Promo", "SchoolHoliday", "StateHoliday"]
 FEATURE_COLS = CALENDAR_COLS + LAG_ROLLING_COLS + RAW_COLS + STORE_COLS
 CATEGORICAL_COLS = ["Store", "StoreType", "Assortment", "StateHoliday"]
 
+# Kept in one dict so the values MLflow records are the values the model was
+# actually built with, rather than a second copy that can drift.
+MODEL_PARAMS = {
+    "n_estimators": 300,
+    "learning_rate": 0.05,
+    "num_leaves": 31,
+    "random_state": 42,
+}
+PARAMS = {
+    **MODEL_PARAMS,
+    "scope": "global",
+    "n_features": len(FEATURE_COLS),
+    "holdout_days": HOLDOUT_DAYS,
+}
+
 
 def _load_data(data_dir: Path = DATA_DIR, store_ids: list[int] = SAMPLE_STORES) -> pd.DataFrame:
     train = pd.read_csv(data_dir / "train.csv", parse_dates=["Date"], low_memory=False)
@@ -88,7 +103,7 @@ def run(
     df = _load_data(data_dir, store_ids)
     train_df, test_df = _split(df, train_end=train_end, test_end=test_end)
 
-    model = LGBMRegressor(n_estimators=300, learning_rate=0.05, num_leaves=31, random_state=42, verbosity=-1)
+    model = LGBMRegressor(**MODEL_PARAMS, verbosity=-1)
     model.fit(train_df[FEATURE_COLS], train_df["Sales"])
 
     test_df = test_df.copy()
@@ -113,7 +128,7 @@ def run(
 
 
 def main() -> None:
-    run_cli(run, "LightGBM", RESULTS_PATH)
+    run_cli(run, "lightgbm", RESULTS_PATH, PARAMS)
 
 
 if __name__ == "__main__":

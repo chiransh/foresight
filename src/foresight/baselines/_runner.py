@@ -16,12 +16,19 @@ from typing import Callable
 
 import pandas as pd
 
+from foresight.tracking import log_run
 
-def run_cli(run_fn: Callable, model_name: str, default_results_path: Path) -> None:
+
+def run_cli(
+    run_fn: Callable, model_name: str, default_results_path: Path, params: dict | None = None
+) -> None:
     parser = argparse.ArgumentParser(description=f"Run the {model_name} baseline.")
     parser.add_argument("--train-end", help="Train on data up to this date (YYYY-MM-DD).")
     parser.add_argument("--test-end", help="Evaluate through this date (YYYY-MM-DD).")
     parser.add_argument("--out", help="Write result JSON here instead of the default path.")
+    parser.add_argument(
+        "--no-tracking", action="store_true", help="Skip MLflow logging for this run."
+    )
     args = parser.parse_args()
 
     results = run_fn(
@@ -32,6 +39,15 @@ def run_cli(run_fn: Callable, model_name: str, default_results_path: Path) -> No
     out_path = Path(args.out) if args.out else default_results_path
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(results, indent=2))
+
+    if not args.no_tracking:
+        log_run(
+            model_name,
+            params or {},
+            results,
+            train_end=args.train_end,
+            test_end=args.test_end,
+        )
 
     print(f"{model_name} baseline, {len(results['per_store'])} stores")
     for metric, value in results["overall"].items():

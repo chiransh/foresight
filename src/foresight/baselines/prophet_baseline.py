@@ -20,6 +20,15 @@ from foresight.metrics import mape, smape, wape
 DATA_DIR = Path("data/raw")
 RESULTS_PATH = Path("evals/results/prophet.json")
 
+PARAMS = {
+    "weekly_seasonality": True,
+    "yearly_seasonality": True,
+    "daily_seasonality": False,
+    "extra_regressors": "promo",
+    "scope": "per_store",
+    "holdout_days": HOLDOUT_DAYS,
+}
+
 
 def _fit_and_evaluate(
     df: pd.DataFrame,
@@ -82,7 +91,7 @@ def run(
 
 
 def main() -> None:
-    run_cli(run, "Prophet", RESULTS_PATH)
+    run_cli(run, "prophet", RESULTS_PATH, PARAMS)
 
 
 if __name__ == "__main__":

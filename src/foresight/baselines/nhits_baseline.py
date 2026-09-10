@@ -22,6 +22,20 @@ from foresight.metrics import mape, smape, wape
 DATA_DIR = Path("data/raw")
 RESULTS_PATH = Path("evals/results/nhits.json")
 
+# Kept in one dict so the values MLflow records are the values the model was
+# actually built with, rather than a second copy that can drift.
+MODEL_PARAMS = {
+    "max_steps": 300,
+    "random_seed": 42,
+    "input_size_multiplier": 3,
+}
+PARAMS = {
+    **MODEL_PARAMS,
+    "scope": "global",
+    "futr_exog": "promo,open",
+    "holdout_days": HOLDOUT_DAYS,
+}
+
 
 def _load_long_df(data_dir: Path = DATA_DIR, store_ids: list[int] = SAMPLE_STORES) -> pd.DataFrame:
     train = pd.read_csv(data_dir / "train.csv", parse_dates=["Date"], low_memory=False)
@@ -56,10 +70,10 @@ def run(
 
     model = NHITS(
         h=holdout_days,
-        input_size=holdout_days * 3,
+        input_size=holdout_days * MODEL_PARAMS["input_size_multiplier"],
         futr_exog_list=["promo", "open"],
-        max_steps=300,
-        random_seed=42,
+        max_steps=MODEL_PARAMS["max_steps"],
+        random_seed=MODEL_PARAMS["random_seed"],
         enable_progress_bar=False,
         logger=False,
     )
@@ -91,7 +105,7 @@ def run(
 
 
 def main() -> None:
-    run_cli(run, "NHITS", RESULTS_PATH)
+    run_cli(run, "nhits", RESULTS_PATH, PARAMS)
 
 
 if __name__ == "__main__":
