@@ -31,6 +31,9 @@ data/raw/*
 mlruns/
 mlflow.db
 mlartifacts/
+
+# Trained model artifacts are rebuilt with `foresight-train-model`
+models/
 lightning_logs/
 
 *.log
