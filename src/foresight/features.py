@@ -8,6 +8,35 @@ backtest than it will be in production.
 
 import pandas as pd
 
+# The column lists live here, next to the code that builds them, rather than
+# in a model module. Training and serving both need them, and when they lived
+# in the LightGBM baseline the API imported that module just to read them,
+# which dragged MLflow into the serving image for no reason.
+LAG_ROLLING_COLS = [
+    "sales_lag_1",
+    "sales_lag_7",
+    "sales_lag_14",
+    "sales_lag_28",
+    "sales_rolling_mean_7",
+    "sales_rolling_std_7",
+    "sales_rolling_mean_28",
+    "sales_rolling_std_28",
+]
+CALENDAR_COLS = [
+    "year",
+    "month",
+    "day",
+    "day_of_week",
+    "week_of_year",
+    "is_weekend",
+    "is_month_start",
+    "is_month_end",
+]
+STORE_COLS = ["Store", "StoreType", "Assortment", "CompetitionDistance", "Promo2"]
+RAW_COLS = ["Promo", "SchoolHoliday", "StateHoliday"]
+FEATURE_COLS = CALENDAR_COLS + LAG_ROLLING_COLS + RAW_COLS + STORE_COLS
+CATEGORICAL_COLS = ["Store", "StoreType", "Assortment", "StateHoliday"]
+
 
 def add_calendar_features(df: pd.DataFrame, date_col: str = "Date") -> pd.DataFrame:
     df = df.copy()

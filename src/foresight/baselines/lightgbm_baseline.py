@@ -15,36 +15,18 @@ from lightgbm import LGBMRegressor
 
 from foresight.baselines._runner import run_cli
 from foresight.config import HOLDOUT_DAYS, SAMPLE_STORES
-from foresight.features import build_features
+from foresight.features import (
+    CATEGORICAL_COLS,
+    FEATURE_COLS,
+    LAG_ROLLING_COLS,
+    STORE_COLS,
+    build_features,
+)
 from foresight.metrics import mape, smape, wape
 
 DATA_DIR = Path("data/raw")
 RESULTS_PATH = Path("evals/results/lightgbm.json")
 
-LAG_ROLLING_COLS = [
-    "sales_lag_1",
-    "sales_lag_7",
-    "sales_lag_14",
-    "sales_lag_28",
-    "sales_rolling_mean_7",
-    "sales_rolling_std_7",
-    "sales_rolling_mean_28",
-    "sales_rolling_std_28",
-]
-CALENDAR_COLS = [
-    "year",
-    "month",
-    "day",
-    "day_of_week",
-    "week_of_year",
-    "is_weekend",
-    "is_month_start",
-    "is_month_end",
-]
-STORE_COLS = ["Store", "StoreType", "Assortment", "CompetitionDistance", "Promo2"]
-RAW_COLS = ["Promo", "SchoolHoliday", "StateHoliday"]
-FEATURE_COLS = CALENDAR_COLS + LAG_ROLLING_COLS + RAW_COLS + STORE_COLS
-CATEGORICAL_COLS = ["Store", "StoreType", "Assortment", "StateHoliday"]
 
 # Kept in one dict so the values MLflow records are the values the model was
 # actually built with, rather than a second copy that can drift.

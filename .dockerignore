@@ -1,0 +1,23 @@
+.git/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# Mounted at run time, not baked into the image
+data/
+models/
+
+mlruns/
+mlartifacts/
+mlflow.db
+lightning_logs/
+notebooks/
+evals/
+tests/
+.pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+.DS_Store
+*.log

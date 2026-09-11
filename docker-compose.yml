@@ -1,0 +1,63 @@
+# API, Postgres, and an MLflow tracking server.
+#
+# Postgres is here as MLflow's backend store, not as the API's database: the
+# API reads a model artifact from disk and holds no state of its own. MLflow 3
+# puts the old ./mlruns file store in maintenance mode, so a real backend is
+# the supported path rather than a nicety.
+#
+# The dataset and the trained model are mounted rather than baked into the
+# image. The raw Rossmann data is large and not redistributable, and a model
+# artifact belongs to a training run, not to a source build.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: mlflow
+      POSTGRES_PASSWORD: mlflow
+      POSTGRES_DB: mlflow
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      # MLflow's own migrations fail if it connects before Postgres accepts
+      # queries, so the tracking server waits on this rather than on start.
+      test: ["CMD-SHELL", "pg_isready -U mlflow -d mlflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v3.16.0
+    command: >
+      sh -c "pip install --no-cache-dir psycopg2-binary &&
+             mlflow server
+             --backend-store-uri postgresql://mlflow:mlflow@postgres:5432/mlflow
+             --artifacts-destination /mlartifacts
+             --host 0.0.0.0
+             --port 5000"
+    ports:
+      - "5000:5000"
+    volumes:
+      - mlflow-artifacts:/mlartifacts
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      # Set so a training run started inside this container logs to the
+      # tracking server rather than to a file the container then discards.
+      MLFLOW_TRACKING_URI: http://mlflow:5000
+    volumes:
+      # Read-only: the API has no business writing to the dataset.
+      - ./data:/app/data:ro
+      - ./models:/app/models
+    depends_on:
+      - mlflow
+
+volumes:
+  postgres-data:
+  mlflow-artifacts:

@@ -26,14 +26,14 @@ import numpy as np
 import pandas as pd
 from lightgbm import LGBMRegressor
 
-from foresight.baselines.lightgbm_baseline import (
+from foresight.config import SAMPLE_STORES
+from foresight.features import (
     CATEGORICAL_COLS,
     FEATURE_COLS,
     LAG_ROLLING_COLS,
     STORE_COLS,
+    build_features,
 )
-from foresight.config import SAMPLE_STORES
-from foresight.features import build_features
 
 DATA_DIR = Path("data/raw")
 MODEL_PATH = Path("models/forecast_model.joblib")
