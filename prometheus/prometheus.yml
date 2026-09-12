@@ -1,0 +1,19 @@
+# The API exposes /metrics on its own port, so no separate exporter sidecar is
+# needed. A 15 second interval is fine for a service whose slowest endpoint
+# takes a couple of seconds; scraping faster would add series without adding
+# resolution anyone reads.
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: foresight-api
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["api:8000"]
+        labels:
+          service: foresight
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]

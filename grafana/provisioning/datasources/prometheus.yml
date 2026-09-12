@@ -1,0 +1,13 @@
+# Provisioned so the dashboard works on first start. Without a matching uid,
+# an imported dashboard loads with an unset datasource and every panel shows
+# "No data" for reasons that look like a broken query.
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    uid: foresight-prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
