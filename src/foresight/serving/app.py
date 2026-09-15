@@ -8,6 +8,7 @@ Run it with: uvicorn foresight.serving.app:app
 """
 
 from contextlib import asynccontextmanager
+from datetime import date
 
 from fastapi import FastAPI, HTTPException, Query
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
@@ -22,7 +23,7 @@ from foresight.serving.metrics import (
     metrics_middleware,
     set_model_info,
 )
-from foresight.serving.model import MAX_HORIZON, ForecastModel
+from foresight.serving.model import MAX_HORIZON, CalendarError, ForecastModel
 
 
 class ForecastPoint(BaseModel):
@@ -31,6 +32,11 @@ class ForecastPoint(BaseModel):
     prediction: float
     lower: float
     upper: float
+    # Echoed back so a caller can see the calendar each number was forecast
+    # under, rather than trusting the request was read the way they meant it.
+    promo: bool
+    school_holiday: bool
+    state_holiday: bool
 
 
 class ForecastResponse(BaseModel):
@@ -38,6 +44,8 @@ class ForecastResponse(BaseModel):
     horizon: int
     model_version: str
     interval: str = Field(description="Which quantiles the bounds represent.")
+    window_start: str = Field(description="First date forecast.")
+    window_end: str = Field(description="Last date forecast.")
     forecast: list[ForecastPoint]
 
 
@@ -76,17 +84,37 @@ def create_app(forecast_model: ForecastModel | None = None) -> FastAPI:
     def forecast(
         series_id: int = Query(description="Store id to forecast."),
         horizon: int = Query(7, ge=1, le=MAX_HORIZON, description="Days ahead to forecast."),
+        promo_dates: list[date] = Query(
+            default=[],
+            description="Dates in the window with a promo running. Repeat the parameter per date.",
+        ),
+        school_holiday_dates: list[date] = Query(
+            default=[], description="Dates in the window that are school holidays."
+        ),
+        state_holiday_dates: list[date] = Query(
+            default=[], description="Dates in the window that are public holidays."
+        ),
     ) -> ForecastResponse:
         model = state["model"]
 
         try:
-            points = model.forecast(series_id, horizon)
+            window_start, window_end = model.forecast_window(series_id, horizon)
+            points = model.forecast(
+                series_id,
+                horizon,
+                promo_dates=promo_dates,
+                school_holiday_dates=school_holiday_dates,
+                state_holiday_dates=state_holiday_dates,
+            )
         except KeyError:
             FORECASTS.labels(outcome="unknown_series").inc()
             raise HTTPException(
                 status_code=404,
                 detail=f"unknown series_id {series_id}; served series are {model.series_ids}",
             ) from None
+        except CalendarError as exc:
+            FORECASTS.labels(outcome="invalid_calendar").inc()
+            raise HTTPException(status_code=422, detail=str(exc)) from None
 
         FORECASTS.labels(outcome="success").inc()
         FORECAST_HORIZON.observe(horizon)
@@ -96,6 +124,8 @@ def create_app(forecast_model: ForecastModel | None = None) -> FastAPI:
             horizon=horizon,
             model_version=model.version,
             interval="p10-p90",
+            window_start=window_start.isoformat(),
+            window_end=window_end.isoformat(),
             forecast=[ForecastPoint(**point) for point in points],
         )
 

@@ -18,7 +18,9 @@ identical category sets at fit and predict time, and when they silently differ
 LightGBM does not complain, it just scores against the wrong codes.
 """
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 
 import joblib
@@ -46,6 +48,10 @@ HISTORY_DAYS = 60
 MAX_HORIZON = 90
 
 
+class CalendarError(ValueError):
+    """A supplied calendar date does not fall inside the forecast window."""
+
+
 @dataclass
 class ForecastModel:
     models: dict[str, LGBMRegressor]
@@ -64,9 +70,46 @@ class ForecastModel:
             df[col] = df[col].astype(str).map(mapping).astype("float")
         return df
 
-    def forecast(self, series_id: int, horizon: int) -> list[dict]:
+    def forecast_window(self, series_id: int, horizon: int) -> tuple[date, date]:
+        """First and last date a forecast of this horizon covers."""
         if series_id not in self.series_ids:
             raise KeyError(series_id)
+        last = self.history[self.history.Store == series_id].Date.max()
+        return (last + pd.Timedelta(days=1)).date(), (last + pd.Timedelta(days=horizon)).date()
+
+    def forecast(
+        self,
+        series_id: int,
+        horizon: int,
+        promo_dates: Iterable[date] = (),
+        school_holiday_dates: Iterable[date] = (),
+        state_holiday_dates: Iterable[date] = (),
+    ) -> list[dict]:
+        """Forecast `horizon` days ahead.
+
+        Promo and holiday flags are business calendar facts a caller knows in
+        advance, so they are inputs rather than assumptions. Leaving them out
+        is expensive: with other features held fixed, the served model
+        forecasts weekday promo days about 26 percent higher. Any date not
+        listed is treated as no promo and no holiday.
+        """
+        first, last = self.forecast_window(series_id, horizon)
+
+        calendars = {
+            "promo": set(promo_dates),
+            "school_holiday": set(school_holiday_dates),
+            "state_holiday": set(state_holiday_dates),
+        }
+        # A date outside the window is almost always a caller bug, such as an
+        # off-by-one on the start date. Silently ignoring it would return a
+        # forecast that looks right and quietly left the promo out.
+        for name, dates in calendars.items():
+            outside = sorted(d for d in dates if not first <= d <= last)
+            if outside:
+                raise CalendarError(
+                    f"{name} dates outside the forecast window {first} to {last}: "
+                    + ", ".join(d.isoformat() for d in outside)
+                )
 
         history = self.history[self.history.Store == series_id].sort_values("Date").copy()
         meta = self.store_meta[self.store_meta.Store == series_id]
@@ -75,20 +118,24 @@ class ForecastModel:
         rows = []
         for step in range(1, horizon + 1):
             target_date = last_date + pd.Timedelta(days=step)
+            day = target_date.date()
 
-            # Promo and the holiday flags are business calendar facts a caller
-            # would know in advance. Nothing here does, so they default to off
-            # and the forecast is a no-promo baseline. Supplying them is the
-            # obvious next thing this endpoint needs.
+            promo = day in calendars["promo"]
+            school_holiday = day in calendars["school_holiday"]
+            state_holiday = day in calendars["state_holiday"]
+
             future = pd.DataFrame(
                 [
                     {
                         "Store": series_id,
                         "Date": target_date,
                         "Sales": np.nan,
-                        "Promo": 0,
-                        "SchoolHoliday": 0,
-                        "StateHoliday": "0",
+                        "Promo": int(promo),
+                        "SchoolHoliday": int(school_holiday),
+                        # Rossmann codes public holidays as "a". Easter and
+                        # Christmas have their own codes, which callers cannot
+                        # currently distinguish.
+                        "StateHoliday": "a" if state_holiday else "0",
                     }
                 ]
             )
@@ -113,11 +160,14 @@ class ForecastModel:
             )
             rows.append(
                 {
-                    "date": target_date.date().isoformat(),
+                    "date": day.isoformat(),
                     "horizon_step": step,
                     "prediction": max(median, 0.0),
                     "lower": max(lower, 0.0),
                     "upper": max(upper, 0.0),
+                    "promo": promo,
+                    "school_holiday": school_holiday,
+                    "state_holiday": state_holiday,
                 }
             )
 

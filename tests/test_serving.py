@@ -99,3 +99,116 @@ def test_saved_model_loads_from_another_entry_point_and_forecasts_the_same(small
     assert reloaded.version == small_model.version
     assert reloaded.series_ids == small_model.series_ids
     assert reloaded.forecast(85, 3) == small_model.forecast(85, 3)
+
+
+# Calendar inputs ---------------------------------------------------------------
+
+
+@pytest.fixture(scope="module")
+def promo_capable_model():
+    """The shared 10-tree test model is too shallow to learn promo at all: on the
+    sample it shows no promo effect for one store and a negative one on some days
+    for the other. 50 trees picks it up consistently, so the promo-direction
+    tests use this instead of asserting something the fast model never learned."""
+    return model_module.train(**{**SAMPLE_KWARGS, "n_estimators": 50})
+
+
+def _weekdays_in_window(model, series_id, horizon):
+    from datetime import timedelta
+
+    first, _ = model.forecast_window(series_id, horizon)
+    days = [first + timedelta(days=i) for i in range(horizon)]
+    return [d for d in days if d.weekday() < 5]
+
+
+def test_no_calendar_means_every_flag_is_false(client):
+    body = client.get("/forecast", params={"series_id": 85, "horizon": 5}).json()
+    for point in body["forecast"]:
+        assert point["promo"] is False
+        assert point["school_holiday"] is False
+        assert point["state_holiday"] is False
+
+
+def test_response_reports_the_forecast_window(client, small_model):
+    body = client.get("/forecast", params={"series_id": 85, "horizon": 5}).json()
+    first, last = small_model.forecast_window(85, 5)
+
+    assert body["window_start"] == first.isoformat()
+    assert body["window_end"] == last.isoformat()
+    assert body["forecast"][0]["date"] == body["window_start"]
+    assert body["forecast"][-1]["date"] == body["window_end"]
+
+
+def test_promo_dates_are_applied_to_exactly_those_days(client, small_model):
+    weekdays = _weekdays_in_window(small_model, 85, 7)[:2]
+    params = [("series_id", 85), ("horizon", 7)] + [("promo_dates", d.isoformat()) for d in weekdays]
+
+    body = client.get("/forecast", params=params).json()
+    flagged = {p["date"] for p in body["forecast"] if p["promo"]}
+
+    assert flagged == {d.isoformat() for d in weekdays}
+
+
+def test_promo_raises_the_weekday_forecast(promo_capable_model):
+    """Promo is the strongest known-in-advance driver in this data. A model that
+    forecast a promo week no higher than a normal one would be ignoring it."""
+    for series_id in promo_capable_model.series_ids:
+        weekdays = _weekdays_in_window(promo_capable_model, series_id, 7)
+        base = {r["date"]: r["prediction"] for r in promo_capable_model.forecast(series_id, 7)}
+        promo = {
+            r["date"]: r["prediction"]
+            for r in promo_capable_model.forecast(series_id, 7, promo_dates=weekdays)
+        }
+
+        days = [d.isoformat() for d in weekdays]
+        assert sum(promo[d] for d in days) > sum(base[d] for d in days), series_id
+
+
+def test_calendar_does_not_change_days_it_does_not_name(promo_capable_model):
+    """A promo on the last day of the window cannot affect earlier days, because
+    the forecast only ever looks backward through its lags."""
+    first, last = promo_capable_model.forecast_window(85, 7)
+    base = promo_capable_model.forecast(85, 7)
+    with_promo = promo_capable_model.forecast(85, 7, promo_dates=[last])
+
+    assert [r["prediction"] for r in base[:-1]] == [r["prediction"] for r in with_promo[:-1]]
+
+
+def test_a_date_outside_the_window_is_rejected_not_ignored(client, small_model):
+    """Silently dropping it would return a plausible forecast that quietly left
+    the promo out, which is worse than an error."""
+    first, _ = small_model.forecast_window(85, 3)
+    response = client.get(
+        "/forecast",
+        params={"series_id": 85, "horizon": 3, "promo_dates": "2014-01-01"},
+    )
+
+    assert response.status_code == 422
+    assert "outside the forecast window" in response.json()["detail"]
+    assert first.isoformat() in response.json()["detail"]
+
+
+def test_an_off_by_one_start_date_is_caught(client, small_model):
+    from datetime import timedelta
+
+    first, _ = small_model.forecast_window(85, 3)
+    day_before = (first - timedelta(days=1)).isoformat()
+
+    response = client.get(
+        "/forecast", params={"series_id": 85, "horizon": 3, "promo_dates": day_before}
+    )
+    assert response.status_code == 422
+
+
+def test_an_unparseable_date_is_rejected(client):
+    response = client.get(
+        "/forecast", params={"series_id": 85, "horizon": 3, "promo_dates": "next tuesday"}
+    )
+    assert response.status_code == 422
+
+
+def test_model_raises_calendar_error_directly(small_model):
+    from datetime import date
+
+    with pytest.raises(model_module.CalendarError):
+        small_model.forecast(85, 3, school_holiday_dates=[date(2000, 1, 1)])

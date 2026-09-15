@@ -88,6 +88,10 @@ Fixing it properly means comparing like periods, excluding deterministic calenda
 
 **Prediction intervals come from quantile regression, not from residual spread.** The API serves three LightGBM models at the 10th, 50th, and 90th percentiles. Taking a point model and adding a residual standard deviation would assume symmetric, constant-variance errors, and daily retail sales have neither: spread is wider on promo and holiday days. The three models are fit independently, so nothing guarantees p10 lands below p90, and the bounds are sorted rather than emitted inverted.
 
+**The promo and holiday calendar is a request input, not an assumption.** Promo is known in advance and it matters: with every other feature held fixed, the served model forecasts weekday promo days 26 percent higher on average across the 12 stores, and higher for every one of them (between 11 and 39 percent). That is smaller than the 39 percent raw gap in the EDA, which is expected, since promo days cluster on particular weekdays and periods and part of the raw gap is that timing rather than the promo. Callers pass dates with `promo_dates`, `school_holiday_dates`, and `state_holiday_dates`; each forecast day echoes the flags it was forecast under, and the response states the window those dates must fall in. A date outside the window is rejected with a 422 rather than ignored, because the usual cause is an off-by-one on the start date, and silently dropping it would return a plausible forecast with the promo quietly missing.
+
+Two caveats show up in the output and are worth knowing. The quantile models are fit independently and do not respond to the promo flag equally, so on promo days the median can sit close to the upper bound and the interval turns lopsided. And the public-holiday effect is learned from a thin, self-selected sample, since most stores close on public holidays and only the ones that open contribute training rows, which is why a holiday forecast comes back with a much wider interval than an ordinary day. That width is honest rather than a defect.
+
 **Multi-day horizons are recursive, with the cost stated.** Predict tomorrow, treat that median as the actual, recompute lags, continue. That is the standard way to get a path out of lag features, and error compounds with horizon, so late days in a long horizon are worth less than early ones.
 
 **WAPE and sMAPE over MAPE alone.** Per-store mean sales span roughly 8x across the sample, so a metric that is not scale-normalized gets dominated by the highest-volume stores. MAPE is reported for familiarity, and it also excludes zero-actual rows, which would otherwise divide by zero on closed days.
@@ -128,15 +132,21 @@ foresight-retrain                    # scheduled checks, retrains on drift
 ```
 
 ```bash
-curl "localhost:8000/forecast?series_id=195&horizon=3"
+curl "localhost:8000/forecast?series_id=195&horizon=5&promo_dates=2015-08-03&promo_dates=2015-08-04"
 ```
 
 ```json
 {
-  "series_id": 195, "horizon": 3, "model_version": "lightgbm-quantile-1", "interval": "p10-p90",
-  "forecast": [{"date": "2015-08-01", "horizon_step": 1, "prediction": 10923.96, "lower": 9680.02, "upper": 12395.95}]
+  "series_id": 195, "horizon": 5, "model_version": "lightgbm-quantile-1", "interval": "p10-p90",
+  "window_start": "2015-08-01", "window_end": "2015-08-05",
+  "forecast": [
+    {"date": "2015-08-01", "horizon_step": 1, "prediction": 10923.96, "lower": 9680.02, "upper": 12395.95, "promo": false, "school_holiday": false, "state_holiday": false},
+    {"date": "2015-08-03", "horizon_step": 3, "prediction": 14515.22, "lower": 11557.40, "upper": 14545.31, "promo": true, "school_holiday": false, "state_holiday": false}
+  ]
 }
 ```
+
+With the promo on, the Monday forecast is 14,515; without it, the same day forecasts 10,821. The two days before the promo are identical either way, since the forecast only looks backward through its lags.
 
 The full stack, with the dataset and model mounted rather than baked into the image:
 
@@ -146,7 +156,7 @@ docker compose up        # API :8000, MLflow :5000, Prometheus :9090, Grafana :3
 
 ## Monitoring
 
-The API exposes `/metrics` with request count and latency by route and status, forecast outcomes split between success and unknown series, the requested horizon, and the model version currently loaded, so a retrain that swaps the artifact is visible on the dashboard. Grafana's datasource and dashboard are provisioned rather than imported by hand, because a uid mismatch loads every panel with no data and reads as a broken query instead of a wiring mistake.
+The API exposes `/metrics` with request count and latency by route and status, forecast outcomes split between success, unknown series, and an invalid calendar, the requested horizon, and the model version currently loaded, so a retrain that swaps the artifact is visible on the dashboard. Grafana's datasource and dashboard are provisioned rather than imported by hand, because a uid mismatch loads every panel with no data and reads as a broken query instead of a wiring mistake.
 
 Two tests guard the dashboard: panel datasource uids against the provisioned datasource, and every PromQL expression in the committed dashboard against a live scrape, since a panel querying a renamed metric renders an empty graph rather than an error and nothing else would catch it.
 
@@ -155,7 +165,7 @@ Two tests guard the dashboard: panel datasource uids against the provisioned dat
 - **All 1,115 stores, not 12.** The sample makes the comparison tractable and honest, but absolute error figures would shift on the full set. The relative ordering is what this table is for.
 - **Tuned models, and a record of the tuning.** Every model here runs at fixed hyperparameters, so this compares default configurations, not best cases. A tuned LightGBM and a tuned NHITS would both improve and not necessarily by the same amount.
 - **Error-based drift, not just input drift.** Input distributions are a leading indicator that costs nothing to compute. Prediction error against arriving actuals is the thing worth reacting to, and needs a feedback loop that closes.
-- **Promo and holidays as forecast inputs.** The API defaults future promo and holiday flags to off, so it serves a no-promo baseline. Those are business calendar facts a caller knows in advance and should be able to supply.
+- **Distinguish holiday types.** The API maps every public holiday to Rossmann's generic code, but Easter and Christmas carry their own codes in the data and behave differently. Callers cannot say which kind a date is yet.
 - **Hierarchical reconciliation.** Store, assortment, and chain-level forecasts are produced independently and will not add up. Reconciliation matters as soon as anyone plans at more than one level.
 
 ## Repo layout

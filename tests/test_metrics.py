@@ -161,3 +161,10 @@ def test_dashboard_panels_use_the_provisioned_datasource_uid():
 
     uids = {panel["datasource"]["uid"] for panel in dashboard["panels"]}
     assert uids == {provisioned}
+
+
+def test_invalid_calendar_requests_are_counted_as_their_own_outcome(client):
+    client.get("/forecast", params={"series_id": 85, "horizon": 2, "promo_dates": "2000-01-01"})
+    text = client.get("/metrics").text
+
+    assert _metric_value(text, r'foresight_forecasts_total\{outcome="invalid_calendar"\}') >= 1
