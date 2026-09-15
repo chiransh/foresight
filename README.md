@@ -27,9 +27,11 @@ flowchart LR
     Q --> API[FastAPI /forecast]
     API --> PR[(Prometheus)]
     PR --> GR[Grafana]
-    FE --> D[Drift check<br/>PSI + KS]
-    D -->|threshold crossed| RT[Retrain and<br/>swap artifact]
+    Q -->|live model| CC{Challenger check<br/>same rows, bootstrap CI}
+    FE -->|retrained on newer data| CC
+    CC -->|reliably better| RT[Retrain and<br/>swap artifact]
     RT --> API
+    FE -.->|context only| D[Input drift<br/>PSI + KS]
 ```
 
 Each model family runs in its own subprocess. That is a requirement, not tidiness: LightGBM and PyTorch each bundle their own OpenMP runtime, and loading both into one process deadlocks on macOS with no error at all.
@@ -74,15 +76,28 @@ Full writeup with the caveats, generated from the fold results rather than writt
 
 **Leakage.** Lag and rolling features are computed on data shifted one day within each store, so a feature for day t never sees day t's own value. There are tests that assert this directly, including one that would fail if today's sales leaked into a rolling mean, and one that checks windows do not cross store boundaries.
 
-## Drift detection and retraining
+## Retraining: three triggers, two of them wrong
 
-Every monitored feature gets two tests: a population stability index over quantile bins, and a two-sample KS test. They catch different things, PSI noticing mass moving between regions and KS noticing a small consistent shift that binning smears away. Retraining fires when either trips, so every retrain carries a reason recorded alongside the metric values that caused it.
+The retraining trigger went through three designs, and the first two are the ones most monitoring setups ship with. Each failed on this data in a way worth showing. Full account in [notes/drift.md](notes/drift.md).
 
-The reference window is fixed to the data the live model was trained on, not the previous check. Chaining comparisons makes slow drift invisible: each step looks unremarkable while the total distance from the training distribution grows.
+**Input drift fired on the season.** PSI and KS tests on the features flagged the last six weeks against the six months before them, with `SchoolHoliday` and three rolling sales features tripping. The summer weeks really were distributed differently from spring, but that is seasonal variation the model handles. Comparing against the same weeks in earlier years instead made it worse, tripping all nine sales features: taking out the season exposed year-over-year growth of 4.7 and 12 percent, and with hundreds of rows per window the KS test calls a shift that size overwhelmingly significant. Real, and irrelevant to whether the model still works.
 
-**The honest result: this trigger fires immediately on real data**, flagging 4 of 11 features with `SchoolHoliday` the strongest signal and `sales_rolling_std_28` at PSI 0.474. That is the detector working correctly and the trigger being wrong about what it means. The recent window is mid-summer and the reference runs back through spring, so school holidays genuinely are distributed differently. This is seasonal variation the model is built to handle, not evidence of decay.
+**Live error against validation error could not tell a hard month from a stale model.** Replaying fourteen windows of history, a 25 percent tolerance fired in December and January, where a freshly retrained model would have done no better (WAPE changes of +0.07 and -0.08). It stayed silent in the three windows where retraining would have cut about half a point. December is hard for a model trained yesterday too.
 
-Fixing it properly means comparing like periods, excluding deterministic calendar features, or monitoring prediction error instead of input distributions. The last is the right answer and needs an actuals feedback loop this project does not have. The threshold is left where it is, with the problem documented, because a threshold quietly raised until the alert stops firing is worse than an alert that is honest about firing for the wrong reason. Detail in [notes/drift.md](notes/drift.md).
+**What works is measuring the counterfactual.** For the most recent six weeks the live model has not seen, a challenger is trained on everything available before that window, and both are scored on the same rows. The model retrains only if the challenger is better by more than chance: the lower bound of a 95 percent bootstrap interval on its improvement has to clear zero, with stores resampled whole because a store's days are correlated. There is no tuned threshold. On the same replay:
+
+| Checked on | Gain from retraining | 95% CI | Stores better | Decision |
+|---|---|---|---|---|
+| 2014-07-29 | 6.0% | -0.5% to +14.3% | 50% | keep |
+| 2014-08-28 | 7.3% | +2.7% to +11.3% | 83% | **retrain** |
+| 2014-09-28 | 6.8% | +4.1% to +9.5% | 92% | **retrain** |
+| 2014-10-28 | 2.3% | +0.2% to +5.1% | 75% | **retrain** |
+| 2014-12-29 | -0.6% | -3.7% to +1.9% | 33% | keep |
+| 2015-01-28 | 0.6% | -1.8% to +2.9% | 42% | keep |
+
+The other eight replayed windows are all kept. December is the clearest case for the design: eight of nine sales features had drifted and live error was 1.66 times its validation error, so both earlier triggers would have retrained, and the retrained model would have been 0.6 percent worse. July 2014 shows the conservative side: a 6 percent average gain is kept because only half the stores improved, so the gain belongs to a few stores rather than the chain.
+
+Input drift and error against the validation baseline are still reported with every check. Neither decides anything. The first is where to look for why when the challenger does win, split into behavioural features and calendar features, which shift with the season by definition. The second says whether the current period is hard. Any past decision can be replayed with `--as-of` and `--checked-on`, and a replay cannot overwrite the served model.
 
 ## Engineering decisions
 
@@ -127,8 +142,9 @@ foresight-backtest               # all three across folds, writes evals/comparis
 foresight-train-model            # trains the quantile models the API serves
 uvicorn foresight.serving.app:app
 
-foresight-retrain --once --dry-run   # drift report without retraining
-foresight-retrain                    # scheduled checks, retrains on drift
+foresight-retrain --once --dry-run   # challenger check without retraining
+foresight-retrain                    # scheduled checks, retrains when a challenger reliably wins
+foresight-retrain --as-of 2014-05-31 --checked-on 2014-09-28   # replay a past decision
 ```
 
 ```bash
@@ -164,7 +180,7 @@ Two tests guard the dashboard: panel datasource uids against the provisioned dat
 
 - **All 1,115 stores, not 12.** The sample makes the comparison tractable and honest, but absolute error figures would shift on the full set. The relative ordering is what this table is for.
 - **Tuned models, and a record of the tuning.** Every model here runs at fixed hyperparameters, so this compares default configurations, not best cases. A tuned LightGBM and a tuned NHITS would both improve and not necessarily by the same amount.
-- **Error-based drift, not just input drift.** Input distributions are a leading indicator that costs nothing to compute. Prediction error against arriving actuals is the thing worth reacting to, and needs a feedback loop that closes.
+- **A challenger check that scales.** Each check trains a full challenger, which is cheap for LightGBM on 12 stores and would need a budget for a larger model or a tighter schedule. Twelve stores also make the bootstrap interval coarse, so smaller real gains go undetected; the full store set would resolve them.
 - **Distinguish holiday types.** The API maps every public holiday to Rossmann's generic code, but Easter and Christmas carry their own codes in the data and behave differently. Callers cannot say which kind a date is yet.
 - **Hierarchical reconciliation.** Store, assortment, and chain-level forecasts are produced independently and will not add up. Reconciliation matters as soon as anyone plans at more than one level.
 
@@ -178,19 +194,19 @@ src/foresight/
   baselines/           Prophet, LightGBM, NHITS, each behind one shared CLI
   backtest.py          expanding-window folds, runs every model, writes comparison.md
   tracking.py          MLflow logging shared by all baselines
-  drift.py             PSI and KS tests
-  retraining.py        drift-triggered retrain job and scheduler
+  drift.py             PSI and KS tests, reported as context
+  retraining.py        champion against challenger retrain check, replay, scheduler
   serving/
-    model.py           quantile models, recursive horizon, artifact save and load
+    model.py           quantile models, calendar inputs, validation error, one-step evaluation
     app.py             FastAPI /forecast, /health, /metrics
     metrics.py         Prometheus instrumentation
 evals/                 comparison.md and the raw result JSON per model
-notes/drift.md         drift design and why the trigger currently misfires
+notes/drift.md         three retraining triggers, and the replay that ruled out two
 notebooks/01-eda.ipynb seasonality, missingness, store hierarchy
 grafana/, prometheus/  provisioned dashboard and scrape config
 ```
 
-48 tests, covering leakage in the feature pipeline, the metric definitions, fold construction, drift maths, the API contract, the Grafana dashboard's agreement with what the app exports, and the serving path's dependency boundary.
+72 tests, covering leakage in the feature pipeline, the metric definitions, fold construction, drift maths, the retraining decision rule and its bootstrap, a replay that must never touch the served model, calendar inputs on the API, the Grafana dashboard's agreement with what the app exports, and the serving path's dependency boundary.
 
 ## License
 

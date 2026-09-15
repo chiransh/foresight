@@ -36,6 +36,7 @@ from foresight.features import (
     STORE_COLS,
     build_features,
 )
+from foresight.metrics import wape
 
 DATA_DIR = Path("data/raw")
 MODEL_PATH = Path("models/forecast_model.joblib")
@@ -46,6 +47,11 @@ MODEL_VERSION = "lightgbm-quantile-1"
 # Enough trailing history to fill the longest lag and rolling window.
 HISTORY_DAYS = 60
 MAX_HORIZON = 90
+
+# How much of the end of the training data is held out to measure the error
+# the model is expected to have. Matches the backtest fold length, so the
+# recorded number is directly comparable to evals/comparison.md.
+VALIDATION_DAYS = 42
 
 
 class CalendarError(ValueError):
@@ -59,6 +65,11 @@ class ForecastModel:
     store_meta: pd.DataFrame
     category_maps: dict[str, dict] = field(default_factory=dict)
     version: str = MODEL_VERSION
+    # The last date of actuals the model was fit on, and the error it scored on
+    # a window it had not seen just before that. Monitoring compares live error
+    # against this, so a model without it cannot be judged stale or healthy.
+    trained_through: date | None = None
+    validation_wape: float | None = None
 
     @property
     def series_ids(self) -> list[int]:
@@ -178,7 +189,7 @@ class ForecastModel:
         return rows
 
 
-def _load_training_frame(
+def load_training_frame(
     data_dir: Path,
     store_ids: list[int],
     train_filename: str = "train.csv",
@@ -200,41 +211,69 @@ def _build_category_maps(frame: pd.DataFrame, store_meta: pd.DataFrame) -> dict[
     }
 
 
+def _prepare(
+    frame: pd.DataFrame, store_meta: pd.DataFrame, category_maps: dict[str, dict]
+) -> pd.DataFrame:
+    featured = build_features(frame).merge(store_meta, on="Store", how="left")
+    featured = featured.dropna(subset=LAG_ROLLING_COLS)
+    for col, mapping in category_maps.items():
+        featured[col] = featured[col].astype(str).map(mapping).astype("float")
+    return featured
+
+
+def _fit(X: pd.DataFrame, y: pd.Series, alpha: float, n_estimators: int) -> LGBMRegressor:
+    model = LGBMRegressor(
+        objective="quantile",
+        alpha=alpha,
+        n_estimators=n_estimators,
+        learning_rate=0.05,
+        num_leaves=31,
+        random_state=42,
+        verbosity=-1,
+    )
+    return model.fit(X, y)
+
+
 def train(
     store_ids: list[int] = SAMPLE_STORES,
     data_dir: Path = DATA_DIR,
     n_estimators: int = 300,
     train_filename: str = "train.csv",
     store_filename: str = "store.csv",
+    through: date | None = None,
+    validation_days: int = VALIDATION_DAYS,
 ) -> ForecastModel:
-    """The filename arguments exist so tests can train against the small
-    committed sample rather than the full gitignored dataset."""
-    frame, store_meta = _load_training_frame(
+    """Fit the served quantile models.
+
+    `through` caps the training data at a date, which is how monitoring can
+    replay what a model trained in the past would have done since. The filename
+    arguments exist so tests can train against the small committed sample.
+
+    Before the final fit, the median model is fit once more with the last
+    `validation_days` held out and scored on them. That score is recorded with
+    the artifact as the error this model is expected to have, which is the
+    baseline live error gets compared against.
+    """
+    frame, store_meta = load_training_frame(
         data_dir, store_ids, train_filename=train_filename, store_filename=store_filename
     )
+    if through is not None:
+        frame = frame[frame.Date <= pd.Timestamp(through)]
+
     category_maps = _build_category_maps(frame, store_meta)
+    featured = _prepare(frame, store_meta, category_maps)
 
-    featured = build_features(frame).merge(store_meta, on="Store", how="left")
-    featured = featured.dropna(subset=LAG_ROLLING_COLS)
+    holdout_start = frame.Date.max() - pd.Timedelta(days=validation_days - 1)
+    fit_part = featured[featured.Date < holdout_start]
+    holdout = featured[featured.Date >= holdout_start]
 
-    for col, mapping in category_maps.items():
-        featured[col] = featured[col].astype(str).map(mapping).astype("float")
+    validation_wape = None
+    if len(fit_part) and len(holdout):
+        median = _fit(fit_part[FEATURE_COLS], fit_part["Sales"], QUANTILES["median"], n_estimators)
+        validation_wape = wape(holdout["Sales"].to_numpy(), median.predict(holdout[FEATURE_COLS]))
 
     X, y = featured[FEATURE_COLS], featured["Sales"]
-
-    models = {}
-    for name, alpha in QUANTILES.items():
-        model = LGBMRegressor(
-            objective="quantile",
-            alpha=alpha,
-            n_estimators=n_estimators,
-            learning_rate=0.05,
-            num_leaves=31,
-            random_state=42,
-            verbosity=-1,
-        )
-        model.fit(X, y)
-        models[name] = model
+    models = {name: _fit(X, y, alpha, n_estimators) for name, alpha in QUANTILES.items()}
 
     # Only the trailing history each series needs for its lag and rolling
     # features rides along with the artifact; the rest is dead weight at
@@ -249,7 +288,49 @@ def train(
         history=history.reset_index(drop=True),
         store_meta=store_meta,
         category_maps=category_maps,
+        trained_through=frame.Date.max().date(),
+        validation_wape=validation_wape,
     )
+
+
+def predict_one_step(model: ForecastModel, actuals: pd.DataFrame, start: date, end: date) -> pd.DataFrame:
+    """Median predictions for every open day between start and end, each using
+    the true lags rather than the model's own earlier predictions.
+
+    That isolates how good the model still is from how far a long recursive
+    forecast drifts. `actuals` must include enough history before `start` to
+    fill the lag and rolling features. Each model encodes categoricals with its
+    own saved maps, so two models trained on different date ranges can be scored
+    on the same rows and compared fairly.
+    """
+    actuals = actuals[actuals.Store.isin(model.series_ids)]
+    featured = _prepare(actuals, model.store_meta, model.category_maps)
+    window = featured[
+        (featured.Date >= pd.Timestamp(start)) & (featured.Date <= pd.Timestamp(end))
+    ]
+    if window.empty:
+        return pd.DataFrame(columns=["Store", "Date", "Sales", "predicted"])
+    return window[["Store", "Date", "Sales"]].assign(
+        predicted=model.models["median"].predict(window[FEATURE_COLS])
+    ).reset_index(drop=True)
+
+
+def evaluate(model: ForecastModel, actuals: pd.DataFrame, start: date, end: date) -> dict:
+    """One-step-ahead WAPE of the median model between start and end."""
+    rows = predict_one_step(model, actuals, start, end)
+    if rows.empty:
+        return {"wape": None, "n_rows": 0, "start": str(start), "end": str(end), "per_store": {}}
+
+    return {
+        "wape": wape(rows["Sales"].to_numpy(), rows["predicted"].to_numpy()),
+        "n_rows": int(len(rows)),
+        "start": str(start),
+        "end": str(end),
+        "per_store": {
+            int(store): wape(group["Sales"].to_numpy(), group["predicted"].to_numpy())
+            for store, group in rows.groupby("Store")
+        },
+    }
 
 
 def save(model: ForecastModel, path: Path = MODEL_PATH) -> Path:
@@ -269,6 +350,10 @@ def save(model: ForecastModel, path: Path = MODEL_PATH) -> Path:
             "store_meta": model.store_meta,
             "category_maps": model.category_maps,
             "version": model.version,
+            "trained_through": (
+                model.trained_through.isoformat() if model.trained_through else None
+            ),
+            "validation_wape": model.validation_wape,
         },
         path,
     )
@@ -283,6 +368,14 @@ def load(path: Path = MODEL_PATH) -> ForecastModel:
         store_meta=payload["store_meta"],
         category_maps=payload["category_maps"],
         version=payload["version"],
+        # Artifacts written before these fields existed still load; they just
+        # cannot be judged against a validation baseline.
+        trained_through=(
+            date.fromisoformat(payload["trained_through"])
+            if payload.get("trained_through")
+            else None
+        ),
+        validation_wape=payload.get("validation_wape"),
     )
 
 
@@ -298,6 +391,7 @@ def main() -> None:
     model = train()
     path = save(model)
     print(f"trained {len(model.models)} quantile models over {len(model.series_ids)} series")
+    print(f"trained through {model.trained_through}, validation WAPE {model.validation_wape:.2f}")
     print(f"saved to {path}")
 
 
