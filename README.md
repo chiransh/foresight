@@ -1,5 +1,7 @@
 # foresight
 
+[![tests](https://github.com/chiransh/foresight/actions/workflows/tests.yml/badge.svg)](https://github.com/chiransh/foresight/actions/workflows/tests.yml)
+
 Demand forecasting on Rossmann store sales: three model families benchmarked against each other under expanding-window cross-validation, then the winner served behind an API with prediction intervals, drift-triggered retraining, and metrics.
 
 The comparison is the point. A single model with no baseline proves nothing, and a single train/test split at the end of a series flatters every model that touches it. Both of those are measured here rather than asserted.
