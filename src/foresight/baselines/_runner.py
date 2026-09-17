@@ -16,6 +16,7 @@ from typing import Callable
 
 import pandas as pd
 
+from foresight.config import resolve_stores
 from foresight.tracking import log_run
 
 
@@ -29,9 +30,15 @@ def run_cli(
     parser.add_argument(
         "--no-tracking", action="store_true", help="Skip MLflow logging for this run."
     )
+    parser.add_argument(
+        "--stores",
+        default="sample",
+        help="sample for the pinned 12-store benchmark, all for every store, or a comma-separated list.",
+    )
     args = parser.parse_args()
 
     results = run_fn(
+        store_ids=resolve_stores(args.stores),
         train_end=pd.Timestamp(args.train_end) if args.train_end else None,
         test_end=pd.Timestamp(args.test_end) if args.test_end else None,
     )

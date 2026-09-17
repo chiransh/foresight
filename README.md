@@ -62,9 +62,31 @@ Two things worth reading out of that table.
 
 **The single holdout split flatters every model.** Fold 3 is exactly the split each individual baseline script uses on its own, and it is the best fold for all three models: by 0.85 WAPE points for LightGBM, 1.57 for Prophet, and 2.16 for NHITS. Had this project reported one end-of-series holdout, as most do, every number would have looked better than the model deserves, and NHITS would have looked closer to Prophet than it is.
 
-**The neural model does not earn its complexity here**, and that is reported rather than tuned away. Twelve series and a few hundred training steps is not the regime NHITS is built for; it needs many more related series to beat a gradient booster with good lag features. Reporting it anyway is the honest outcome of committing to a three-way comparison before knowing the result.
+**The neural model does not earn its complexity here**, and that is reported rather than tuned away. The obvious explanation was that twelve series is simply too few for NHITS, so that was tested rather than left as an excuse: see below.
 
 Full writeup with the caveats, generated from the fold results rather than written by hand: [evals/comparison.md](evals/comparison.md).
+
+### The same comparison on all 1,115 stores
+
+The table above uses a 12-store sample, so the sample's fairness was checked by rerunning the identical folds over every store, which takes about seven minutes ([notes/full-store-run.md](notes/full-store-run.md), raw numbers in [evals/comparison-all-stores.md](evals/comparison-all-stores.md)).
+
+| Model | WAPE, 12 stores | WAPE, 1,115 stores | Shift |
+|---|---|---|---|
+| **LightGBM** | **8.17** | **8.84** | +0.67 |
+| Prophet | 11.25 | 11.41 | +0.16 |
+| NHITS | 11.94 | 12.37 | +0.42 |
+
+The ranking holds and LightGBM still wins every individual fold, so the sample was a fair proxy for the ordering. Every model gets slightly worse, which is expected: twelve stratified stores cannot contain the hardest ones. The shift is not uniform, though, and LightGBM moved four times as far as Prophet, narrowing the gap between them from 3.08 WAPE points to 2.57.
+
+**The scale explanation for NHITS did not survive the test.** An earlier version of this README argued the neural model lost because 12 series is too few for it. With 93 times more series it is still last, and slightly further behind. The fair objection is that the step count stays fixed at 300 while the series count does not, so it may just be undertrained at scale. On the full store set, fold 3:
+
+| NHITS configuration | WAPE |
+|---|---|
+| 300 steps, no validation split (as benchmarked) | 10.56 |
+| 1,500 steps, no validation split | 12.12 |
+| 1,500 steps, 42-day validation split with early stopping | 14.11 |
+
+More training made it worse. Without a validation split nothing stops it overfitting, and adding one costs it the most recent six weeks, which is what a lag-driven forecast leans on hardest. Three configurations is not a tuning sweep, so the open question is whether a properly tuned NHITS competes; what is settled is that the amount of data was not the problem.
 
 ## Backtesting design
 
@@ -180,7 +202,7 @@ Two tests guard the dashboard: panel datasource uids against the provisioned dat
 
 ## What I would change for production
 
-- **All 1,115 stores, not 12.** The sample makes the comparison tractable and honest, but absolute error figures would shift on the full set. The relative ordering is what this table is for.
+- **Per-store reporting at scale.** The full-store run reports one aggregate per model. Which stores a model fails on, and whether the failures cluster by store type or by sparse history, is the question a chain would actually ask, and the per-store numbers are in the results JSON but nothing summarises them yet.
 - **Tuned models, and a record of the tuning.** Every model here runs at fixed hyperparameters, so this compares default configurations, not best cases. A tuned LightGBM and a tuned NHITS would both improve and not necessarily by the same amount.
 - **A challenger check that scales.** Each check trains a full challenger, which is cheap for LightGBM on 12 stores and would need a budget for a larger model or a tighter schedule. Twelve stores also make the bootstrap interval coarse, so smaller real gains go undetected; the full store set would resolve them.
 - **Distinguish holiday types.** The API maps every public holiday to Rossmann's generic code, but Easter and Christmas carry their own codes in the data and behave differently. Callers cannot say which kind a date is yet.

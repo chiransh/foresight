@@ -25,6 +25,15 @@ def _tracking_uri() -> str:
     return os.environ.get("MLFLOW_TRACKING_URI", DEFAULT_TRACKING_URI)
 
 
+MAX_STORE_IDS_LOGGED = 20
+
+
+def _store_ids_param(store_ids: list) -> str:
+    if len(store_ids) <= MAX_STORE_IDS_LOGGED:
+        return ",".join(str(store) for store in store_ids)
+    return f"{len(store_ids)} stores from {store_ids[0]} to {store_ids[-1]}"
+
+
 def log_run(
     model_name: str,
     params: dict,
@@ -43,7 +52,10 @@ def log_run(
             {
                 "model": model_name,
                 "n_stores": len(per_store),
-                "store_ids": ",".join(str(s) for s in sorted(per_store, key=int)),
+                # MLflow caps parameter length, and the full list for a
+                # 1,115-store run is thousands of characters. Keep the list only
+                # while it is short enough to be worth reading.
+                "store_ids": _store_ids_param(sorted(per_store, key=int)),
                 "train_end": train_end or "series_end_minus_holdout",
                 "test_end": test_end or "series_end",
                 **params,

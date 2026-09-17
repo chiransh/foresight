@@ -57,7 +57,18 @@ def run(
     holdout_days: int = HOLDOUT_DAYS,
     train_end: pd.Timestamp | None = None,
     test_end: pd.Timestamp | None = None,
+    max_steps: int | None = None,
+    val_size: int = 0,
+    early_stop_patience: int = -1,
 ) -> dict:
+    """The three override arguments exist to test the model fairly at scale.
+
+    The step count is fixed while the number of series is not: at 300 steps the
+    model sees a far smaller share of 1,115 series than of 12, so asking whether
+    it is simply undertrained needs `max_steps`. Training longer without a
+    validation split just overfits, so answering that properly needs `val_size`
+    and `early_stop_patience` too. Defaults reproduce the benchmarked
+    configuration."""
     long_df = _load_long_df(data_dir, store_ids)
 
     cutoff = (
@@ -72,13 +83,14 @@ def run(
         h=holdout_days,
         input_size=holdout_days * MODEL_PARAMS["input_size_multiplier"],
         futr_exog_list=["promo", "open"],
-        max_steps=MODEL_PARAMS["max_steps"],
+        max_steps=max_steps if max_steps is not None else MODEL_PARAMS["max_steps"],
         random_seed=MODEL_PARAMS["random_seed"],
+        early_stop_patience_steps=early_stop_patience,
         enable_progress_bar=False,
         logger=False,
     )
     nf = NeuralForecast(models=[model], freq="D")
-    nf.fit(df=train_df)
+    nf.fit(df=train_df, val_size=val_size)
 
     futr_df = test_df[["unique_id", "ds", "promo", "open"]]
     forecast = nf.predict(futr_df=futr_df)

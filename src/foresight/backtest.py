@@ -14,6 +14,7 @@ for why that isolation is required rather than merely tidy.
 Run from the repo root: `python -m foresight.backtest`.
 """
 
+import argparse
 import json
 import subprocess
 import sys
@@ -59,7 +60,13 @@ def make_folds(
     return list(reversed(folds))
 
 
-def _run_model_fold(module: str, train_end: pd.Timestamp, test_end: pd.Timestamp, out_path: Path) -> dict:
+def _run_model_fold(
+    module: str,
+    train_end: pd.Timestamp,
+    test_end: pd.Timestamp,
+    out_path: Path,
+    stores: str = "sample",
+) -> dict:
     subprocess.run(
         [
             sys.executable,
@@ -69,6 +76,8 @@ def _run_model_fold(module: str, train_end: pd.Timestamp, test_end: pd.Timestamp
             train_end.date().isoformat(),
             "--test-end",
             test_end.date().isoformat(),
+            "--stores",
+            stores,
             "--out",
             str(out_path),
         ],
@@ -79,7 +88,7 @@ def _run_model_fold(module: str, train_end: pd.Timestamp, test_end: pd.Timestamp
     return json.loads(out_path.read_text())
 
 
-def run(n_folds: int = N_FOLDS, data_dir: Path = DATA_DIR) -> dict:
+def run(n_folds: int = N_FOLDS, data_dir: Path = DATA_DIR, stores: str = "sample") -> dict:
     folds = make_folds(_max_date(data_dir), n_folds=n_folds)
 
     fold_results = []
@@ -89,8 +98,13 @@ def run(n_folds: int = N_FOLDS, data_dir: Path = DATA_DIR) -> dict:
             for model_name, module in MODEL_MODULES.items():
                 out_path = Path(tmp_dir) / f"{model_name}_fold{i}.json"
                 print(f"fold {i}/{len(folds)}: {model_name}", file=sys.stderr, flush=True)
-                result = _run_model_fold(module, fold["train_end"], fold["test_end"], out_path)
-                models[model_name] = result["overall"]
+                result = _run_model_fold(
+                    module, fold["train_end"], fold["test_end"], out_path, stores=stores
+                )
+                models[model_name] = {
+                    **result["overall"],
+                    "n_stores": len(result["per_store"]),
+                }
 
             fold_results.append(
                 {
@@ -110,7 +124,7 @@ def run(n_folds: int = N_FOLDS, data_dir: Path = DATA_DIR) -> dict:
         for model_name in MODEL_MODULES
     }
 
-    return {"folds": fold_results, "comparison": comparison}
+    return {"folds": fold_results, "comparison": comparison, "stores": stores}
 
 
 def _fold_observations(results: dict) -> list[str]:
@@ -165,16 +179,38 @@ def _fold_observations(results: dict) -> list[str]:
     return lines
 
 
+def _scope_sentence(results: dict) -> str:
+    """State the store scope from the results rather than asserting it, so a full
+    run and a sample run cannot end up with the same claim in their writeups."""
+    counts = {
+        metrics.get("n_stores")
+        for fold in results["folds"]
+        for metrics in fold["models"].values()
+        if metrics.get("n_stores")
+    }
+    if not counts:
+        return "Every model saw the same store sample."
+    if len(counts) > 1:
+        return (
+            "Models did not all score the same number of stores "
+            f"({', '.join(str(c) for c in sorted(counts))}), so read the comparison with care."
+        )
+    count = counts.pop()
+    if count == 12:
+        return "Every model saw the same pinned 12-store benchmark sample."
+    return f"Every model saw the same {count:,} stores."
+
+
 def _comparison_md(results: dict) -> str:
     lines = [
         "# Model comparison: expanding-window backtest",
         "",
-        f"{N_FOLDS} folds of {FOLD_SIZE_DAYS} days each, walking backward from the end of the "
-        "Rossmann training data. Fold 1 has the smallest training window; each later fold's "
-        "training window is a superset of the one before it, since it also includes the previous "
-        "fold's test days. That is what makes this expanding-window rather than a fixed rolling "
-        "window. Same 12-store sample as the individual baseline scripts, and metrics are "
-        "averaged across folds rather than read off the most recent one.",
+        f"{len(results['folds'])} folds of {FOLD_SIZE_DAYS} days each, walking backward from the "
+        "end of the Rossmann training data. Fold 1 has the smallest training window; each later "
+        "fold's training window is a superset of the one before it, since it also includes the "
+        "previous fold's test days. That is what makes this expanding-window rather than a fixed "
+        f"rolling window. {_scope_sentence(results)} Metrics are averaged across folds rather than "
+        "read off the most recent one.",
         "",
         "## Why not a single holdout split",
         "",
@@ -238,11 +274,24 @@ def _comparison_md(results: dict) -> str:
 
 
 def main() -> None:
-    results = run()
+    parser = argparse.ArgumentParser(description="Expanding-window backtest over every model.")
+    parser.add_argument(
+        "--stores",
+        default="sample",
+        help="sample for the pinned 12-store benchmark, all for every store, or a comma-separated list.",
+    )
+    parser.add_argument("--folds", type=int, default=N_FOLDS)
+    parser.add_argument("--out", help="Where to write the results JSON.")
+    parser.add_argument("--comparison", help="Where to write the comparison markdown.")
+    args = parser.parse_args()
 
-    RESULTS_PATH.parent.mkdir(parents=True, exist_ok=True)
-    RESULTS_PATH.write_text(json.dumps(results, indent=2))
-    COMPARISON_PATH.write_text(_comparison_md(results))
+    results = run(n_folds=args.folds, stores=args.stores)
+
+    results_path = Path(args.out) if args.out else RESULTS_PATH
+    comparison_path = Path(args.comparison) if args.comparison else COMPARISON_PATH
+    results_path.parent.mkdir(parents=True, exist_ok=True)
+    results_path.write_text(json.dumps(results, indent=2))
+    comparison_path.write_text(_comparison_md(results))
 
     print("Expanding-window backtest, average across folds:")
     for model_name, metrics in results["comparison"].items():
@@ -250,7 +299,7 @@ def main() -> None:
             f"  {model_name}: MAPE {metrics['mape']:.2f}  "
             f"WAPE {metrics['wape']:.2f}  sMAPE {metrics['smape']:.2f}"
         )
-    print(f"Saved {RESULTS_PATH} and {COMPARISON_PATH}")
+    print(f"Saved {results_path} and {comparison_path}")
 
 
 if __name__ == "__main__":
