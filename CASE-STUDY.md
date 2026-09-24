@@ -51,6 +51,22 @@ accuracy on the table.
 Scale: 1,017,209 daily records across 1,115 stores over roughly two and a half
 years.
 
+## Which stores it gets wrong
+
+An average across 1,115 shops hides whether the forecast is uniformly decent or
+carried by the easy ones, so the error was broken out store by store.
+
+It is uniform. The median store sits at 8.55 percent error, the 90th percentile
+at 10.72, and only 23 of 1,115 stores are more than half again as bad as the
+median. No store type is weak: the four types run between 8.25 and 8.92.
+
+The one real pattern is size. Error falls steadily from 9.41 percent in the
+smallest fifth of stores to 7.68 in the largest, which is what you would expect,
+since a quiet shop's day-to-day swings are a bigger share of its takings. Worth
+knowing because it tells a planner where to keep more slack, and it is not what
+most people guess: the worst-forecast shops are not the ones that close often.
+Those close 18 percent of days against an estate median of 17.
+
 ## What the measurement changed
 
 An earlier version of this project's writeup claimed the neural model lost
@@ -85,7 +101,7 @@ have retrained, and the retrained model would have been 0.6 percent worse.
 ## Stack
 
 Python, LightGBM, Prophet, NeuralForecast, pandas, FastAPI, MLflow, Prometheus,
-Grafana, Docker Compose, PostgreSQL. 92 automated tests, run on every commit.
+Grafana, Docker Compose, PostgreSQL. 105 automated tests, run on every commit.
 
 ## For engineers
 
@@ -95,3 +111,5 @@ Grafana, Docker Compose, PostgreSQL. 92 automated tests, run on every commit.
 - [notes/drift.md](notes/drift.md) documents all three retraining designs and the
   replay that ruled out the first two.
 - [notes/full-store-run.md](notes/full-store-run.md) covers the scale test above.
+- [evals/store-diagnostics.md](evals/store-diagnostics.md) is the per-store breakdown.
+- [evals/tuning.md](evals/tuning.md) covers the hyperparameter search and why it did not help.

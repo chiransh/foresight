@@ -107,6 +107,25 @@ Two things worth taking from that. The defaults were not leaving accuracy on the
 
 This rules out a modest random search, not tuning in general. A larger or smarter search, or per-fold early stopping inside LightGBM, is untested here.
 
+### Where the forecast fails
+
+One error figure over 1,115 stores answers "which model" and nothing else. A chain wants to know which stores it gets wrong, and whether that is a handful of unusual shops or a weak segment. `foresight-diagnose` keeps the per-store errors the backtest discards and joins them to what is known about each store ([evals/store-diagnostics.md](evals/store-diagnostics.md)).
+
+| | WAPE |
+|---|---|
+| Best store | 5.56 |
+| Median store | 8.55 |
+| 90th percentile | 10.72 |
+| Worst store | 21.95 |
+
+The distribution is tighter than the overall figure suggests: the 90th percentile store is 1.25 times the median, and only 23 of 1,115 stores sit above 1.5 times it. The worst tenth of stores carry 12 percent of the absolute error while making 9 percent of the sales, a ratio of 1.40, which is mild concentration rather than a separable problem set.
+
+**No segment is weak.** Median WAPE by store type runs 8.25 to 8.92 across all four types, including the 17 rare type-b stores, so there is no category the model handles badly.
+
+**Small stores are harder, and that is the one real pattern.** Median WAPE falls from 9.41 in the lowest sales quintile to 7.68 in the highest, a Spearman correlation of -0.43 with volume. Closure rate and length of trading history show none (+0.17 and -0.20). The ten worst stores close 18 percent of days against an estate median of 17, so closures do not explain them either.
+
+That last point is worth stating because it is the kind of thing easy to assume: the worst-forecast shops are not the ones that shut often, they are mostly just small.
+
 ## Backtesting design
 
 **Why not a single holdout split.** A holdout at the end of the series gives one number per model and no sense of whether it is stable. Rossmann has a strong December peak and promo-driven swings, so a window that happens to contain or miss those moves the result. Several folds show whether an advantage survives across periods. The numbers above are the evidence that this mattered.
@@ -221,7 +240,7 @@ Two tests guard the dashboard: panel datasource uids against the provisioned dat
 
 ## What I would change for production
 
-- **Per-store reporting at scale.** The full-store run reports one aggregate per model. Which stores a model fails on, and whether the failures cluster by store type or by sparse history, is the question a chain would actually ask, and the per-store numbers are in the results JSON but nothing summarises them yet.
+- **Diagnostics for the other two models.** The per-store breakdown covers the served model family only, so whether Prophet and NHITS fail on the same stores, or on different ones, is unmeasured. Models that fail on different stores would argue for combining them rather than picking one.
 - **A larger hyperparameter search, and one for the other two models.** Thirty random configurations did not beat the LightGBM defaults on held-out windows, but that rules out a modest search rather than tuning as such. Prophet and NHITS are still untuned, so the comparison remains one between default configurations.
 - **A challenger check that scales.** Each check trains a full challenger, which is cheap for LightGBM on 12 stores and would need a budget for a larger model or a tighter schedule. Twelve stores also make the bootstrap interval coarse, so smaller real gains go undetected; the full store set would resolve them.
 - **Distinguish holiday types.** The API maps every public holiday to Rossmann's generic code, but Easter and Christmas carry their own codes in the data and behave differently. Callers cannot say which kind a date is yet.
@@ -249,7 +268,7 @@ notebooks/01-eda.ipynb seasonality, missingness, store hierarchy
 grafana/, prometheus/  provisioned dashboard and scrape config
 ```
 
-92 tests, covering leakage in the feature pipeline, the metric definitions, fold construction, drift maths, the retraining decision rule and its bootstrap, a replay that must never touch the served model, calendar inputs on the API, the Grafana dashboard's agreement with what the app exports, the serving path's dependency boundary, and that the tuning search never sees the window it is scored on.
+105 tests, covering leakage in the feature pipeline, the metric definitions, fold construction, drift maths, the retraining decision rule and its bootstrap, a replay that must never touch the served model, calendar inputs on the API, the Grafana dashboard's agreement with what the app exports, the serving path's dependency boundary, that the tuning search never sees the window it is scored on, and that the diagnostic's generated wording tracks the numbers it reports.
 
 ## License
 

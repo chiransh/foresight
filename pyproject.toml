@@ -49,6 +49,7 @@ foresight-backtest = "foresight.backtest:main"
 foresight-train-model = "foresight.serving.model:main"
 foresight-retrain = "foresight.retraining:main"
 foresight-tune = "foresight.tuning:main"
+foresight-diagnose = "foresight.diagnostics:main"
 
 [build-system]
 requires = ["setuptools>=68"]
