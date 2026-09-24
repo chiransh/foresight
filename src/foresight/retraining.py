@@ -45,6 +45,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from foresight.comparison import BOOTSTRAP_ITERATIONS, bootstrap_gain, relative_gain
 from foresight.config import SAMPLE_STORES
 from foresight.drift import check_frame
 from foresight.features import LAG_ROLLING_COLS, build_features
@@ -62,7 +63,6 @@ CALENDAR_FEATURES = ["Promo", "SchoolHoliday"]
 
 EVALUATION_DAYS = 42
 REFERENCE_DAYS = 180
-BOOTSTRAP_ITERATIONS = 2000
 # A bootstrap over fewer series than this produces an interval too coarse to
 # mean anything, so the check declines to decide rather than pretending to.
 MIN_SERIES = 5
@@ -101,24 +101,6 @@ def evaluation_window(
     )
     start = max(earliest_unseen, latest - timedelta(days=evaluation_days - 1))
     return (start, latest) if start <= latest else None
-
-
-def relative_gain(errors: pd.DataFrame) -> float:
-    """Share of the live model's absolute error that the challenger removes."""
-    champion = errors["champion"].sum()
-    return float((champion - errors["challenger"].sum()) / champion) if champion else 0.0
-
-
-def bootstrap_gain(
-    per_store: pd.DataFrame, iterations: int = BOOTSTRAP_ITERATIONS, seed: int = 0
-) -> tuple[float, float]:
-    """95 percent interval on relative_gain, resampling whole stores."""
-    rng = np.random.default_rng(seed)
-    n = len(per_store)
-    gains = np.sort(
-        [relative_gain(per_store.iloc[rng.integers(0, n, n)]) for _ in range(iterations)]
-    )
-    return float(gains[int(0.025 * iterations)]), float(gains[int(0.975 * iterations) - 1])
 
 
 def challenger_check(

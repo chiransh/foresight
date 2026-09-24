@@ -48,6 +48,7 @@ foresight-baseline-nhits = "foresight.baselines.nhits_baseline:main"
 foresight-backtest = "foresight.backtest:main"
 foresight-train-model = "foresight.serving.model:main"
 foresight-retrain = "foresight.retraining:main"
+foresight-tune = "foresight.tuning:main"
 
 [build-system]
 requires = ["setuptools>=68"]

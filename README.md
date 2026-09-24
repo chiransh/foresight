@@ -90,6 +90,23 @@ The ranking holds and LightGBM still wins every individual fold, so the sample w
 
 More training made it worse. Without a validation split nothing stops it overfitting, and adding one costs it the most recent six weeks, which is what a lag-driven forecast leans on hardest. Three configurations is not a tuning sweep, so the open question is whether a properly tuned NHITS competes; what is settled is that the amount of data was not the problem.
 
+### Does tuning the winner change the answer
+
+Every model above runs at fixed hyperparameters, which invites the obvious objection: LightGBM only wins because nothing was tuned. So the winner was tuned, without leakage, and the answer is no ([evals/tuning.md](evals/tuning.md)).
+
+Thirty random configurations per fold were scored on an inner validation split taken from the end of each fold's own training window, and the winning configuration was then refit and scored once on the fold's test window, which the search never saw. Tuning on the window you then report from is the most common way a forecasting result becomes fiction.
+
+| | Default WAPE | Tuned WAPE | Folds where tuning reliably won |
+|---|---|---|---|
+| 12-store sample | 7.85 | 7.95 | 1 of 3 |
+| All 1,115 stores | 8.65 | 8.72 | 0 of 3 |
+
+Tuning wins one fold on the sample by 5.1 percent, loses another by 3.3 percent, and on the full store set the tuned configuration is reliably worse in two folds and better in none. A configuration that helps in one six-week window and hurts in the next is not a better model, it is a luckier one.
+
+Two things worth taking from that. The defaults were not leaving accuracy on the table, so the three-way comparison was not resting on an untuned booster. And the search barely beat the defaults even on the data it was selecting on, improving inner-validation WAPE by 0.04 to 0.28 points, which is the size of margin that does not survive contact with a new window.
+
+This rules out a modest random search, not tuning in general. A larger or smarter search, or per-fold early stopping inside LightGBM, is untested here.
+
 ## Backtesting design
 
 **Why not a single holdout split.** A holdout at the end of the series gives one number per model and no sense of whether it is stable. Rossmann has a strong December peak and promo-driven swings, so a window that happens to contain or miss those moves the result. Several folds show whether an advantage survives across periods. The numbers above are the evidence that this mattered.
@@ -205,7 +222,7 @@ Two tests guard the dashboard: panel datasource uids against the provisioned dat
 ## What I would change for production
 
 - **Per-store reporting at scale.** The full-store run reports one aggregate per model. Which stores a model fails on, and whether the failures cluster by store type or by sparse history, is the question a chain would actually ask, and the per-store numbers are in the results JSON but nothing summarises them yet.
-- **Tuned models, and a record of the tuning.** Every model here runs at fixed hyperparameters, so this compares default configurations, not best cases. A tuned LightGBM and a tuned NHITS would both improve and not necessarily by the same amount.
+- **A larger hyperparameter search, and one for the other two models.** Thirty random configurations did not beat the LightGBM defaults on held-out windows, but that rules out a modest search rather than tuning as such. Prophet and NHITS are still untuned, so the comparison remains one between default configurations.
 - **A challenger check that scales.** Each check trains a full challenger, which is cheap for LightGBM on 12 stores and would need a budget for a larger model or a tighter schedule. Twelve stores also make the bootstrap interval coarse, so smaller real gains go undetected; the full store set would resolve them.
 - **Distinguish holiday types.** The API maps every public holiday to Rossmann's generic code, but Easter and Christmas carry their own codes in the data and behave differently. Callers cannot say which kind a date is yet.
 - **Hierarchical reconciliation.** Store, assortment, and chain-level forecasts are produced independently and will not add up. Reconciliation matters as soon as anyone plans at more than one level.
@@ -232,7 +249,7 @@ notebooks/01-eda.ipynb seasonality, missingness, store hierarchy
 grafana/, prometheus/  provisioned dashboard and scrape config
 ```
 
-72 tests, covering leakage in the feature pipeline, the metric definitions, fold construction, drift maths, the retraining decision rule and its bootstrap, a replay that must never touch the served model, calendar inputs on the API, the Grafana dashboard's agreement with what the app exports, and the serving path's dependency boundary.
+92 tests, covering leakage in the feature pipeline, the metric definitions, fold construction, drift maths, the retraining decision rule and its bootstrap, a replay that must never touch the served model, calendar inputs on the API, the Grafana dashboard's agreement with what the app exports, the serving path's dependency boundary, and that the tuning search never sees the window it is scored on.
 
 ## License
 

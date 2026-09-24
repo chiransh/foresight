@@ -41,6 +41,13 @@ WAPE is error as a share of sales volume, so a handful of very large stores
 cannot flatter the result. The gradient booster won every individual window, not
 just the average, so its lead is not an accident of where one split landed.
 
+The obvious follow-up question is whether it only won because nothing was tuned.
+It was then tuned, searching 30 configurations per time window and choosing
+between them without ever looking at the window used for scoring. Tuning did not
+beat the defaults: across all 1,115 stores the tuned configuration was reliably
+worse in two windows of three and better in none. The defaults were not leaving
+accuracy on the table.
+
 Scale: 1,017,209 daily records across 1,115 stores over roughly two and a half
 years.
 
@@ -78,7 +85,7 @@ have retrained, and the retrained model would have been 0.6 percent worse.
 ## Stack
 
 Python, LightGBM, Prophet, NeuralForecast, pandas, FastAPI, MLflow, Prometheus,
-Grafana, Docker Compose, PostgreSQL. 79 automated tests, run on every commit.
+Grafana, Docker Compose, PostgreSQL. 92 automated tests, run on every commit.
 
 ## For engineers
 

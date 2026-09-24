@@ -1,0 +1,128 @@
+{
+  "n_stores": 12,
+  "n_trials": 30,
+  "seed": 42,
+  "folds": [
+    {
+      "fold": 1,
+      "train_end": "2015-03-27",
+      "test_start": "2015-03-28",
+      "test_end": "2015-05-08",
+      "inner_validation_start": "2015-02-14",
+      "default_wape": 8.9534747648037,
+      "tuned_wape": 9.34126474318634,
+      "relative_gain": -0.04331167379921028,
+      "ci_lower": -0.11659125108721637,
+      "ci_upper": 0.029204738188027476,
+      "share_of_stores_better": 0.4166666666666667,
+      "best_params": {
+        "n_estimators": 503,
+        "learning_rate": 0.023296449787850403,
+        "num_leaves": 90,
+        "min_child_samples": 85,
+        "subsample": 0.8561122653289261,
+        "colsample_bytree": 0.9594947849575464,
+        "reg_lambda": 7.475190889753858
+      },
+      "best_inner_wape": 6.6855595130074885,
+      "default_inner_wape": 6.969101451703601,
+      "best_is_default": false,
+      "n_trials": 30
+    },
+    {
+      "fold": 2,
+      "train_end": "2015-05-08",
+      "test_start": "2015-05-09",
+      "test_end": "2015-06-19",
+      "inner_validation_start": "2015-03-28",
+      "default_wape": 7.703254201418855,
+      "tuned_wape": 7.95520393446317,
+      "relative_gain": -0.03270692183543789,
+      "ci_lower": -0.06177966618723158,
+      "ci_upper": -0.003542976602101156,
+      "share_of_stores_better": 0.3333333333333333,
+      "best_params": {
+        "n_estimators": 546,
+        "learning_rate": 0.016297717602012898,
+        "num_leaves": 39,
+        "min_child_samples": 43,
+        "subsample": 0.8710891269522146,
+        "colsample_bytree": 0.8082670857819545,
+        "reg_lambda": 9.549361640684994
+      },
+      "best_inner_wape": 8.911504125201345,
+      "default_inner_wape": 8.9534747648037,
+      "best_is_default": false,
+      "n_trials": 30
+    },
+    {
+      "fold": 3,
+      "train_end": "2015-06-19",
+      "test_start": "2015-06-20",
+      "test_end": "2015-07-31",
+      "inner_validation_start": "2015-05-09",
+      "default_wape": 6.894137358652447,
+      "tuned_wape": 6.543389076985163,
+      "relative_gain": 0.050876311773376676,
+      "ci_lower": 0.023999635140919667,
+      "ci_upper": 0.07221008982317396,
+      "share_of_stores_better": 0.8333333333333334,
+      "best_params": {
+        "n_estimators": 1156,
+        "learning_rate": 0.018344148512429926,
+        "num_leaves": 22,
+        "min_child_samples": 19,
+        "subsample": 0.9969972630334868,
+        "colsample_bytree": 0.6792181121330723,
+        "reg_lambda": 6.9219624247771
+      },
+      "best_inner_wape": 7.60028638222243,
+      "default_inner_wape": 7.703254201418855,
+      "best_is_default": false,
+      "n_trials": 30
+    }
+  ],
+  "summary": {
+    "mean_default_wape": 7.850288774958334,
+    "mean_tuned_wape": 7.946619251544891,
+    "folds_where_tuning_won": 1,
+    "folds_where_tuning_lost": 1
+  },
+  "full_store_check": {
+    "folds": [
+      {
+        "fold": 1,
+        "default_wape": 9.401689805615696,
+        "tuned_wape": 9.4228780902554,
+        "relative_gain": -0.0022536676999328946,
+        "ci_lower": -0.005517531961595492,
+        "ci_upper": 0.0009816257652626266,
+        "share_of_stores_better": 0.4959641255605381,
+        "n_stores": 1115
+      },
+      {
+        "fold": 2,
+        "default_wape": 8.432819981219506,
+        "tuned_wape": 8.566515668498907,
+        "relative_gain": -0.015854208625009112,
+        "ci_lower": -0.0187712014299042,
+        "ci_upper": -0.012995816899491018,
+        "share_of_stores_better": 0.3542600896860987,
+        "n_stores": 1115
+      },
+      {
+        "fold": 3,
+        "default_wape": 8.126476926498183,
+        "tuned_wape": 8.182942851452815,
+        "relative_gain": -0.006948389254698256,
+        "ci_lower": -0.009801473027371695,
+        "ci_upper": -0.004311512769493288,
+        "share_of_stores_better": 0.4304932735426009,
+        "n_stores": 1115
+      }
+    ],
+    "mean_default_wape": 8.653662237777795,
+    "mean_tuned_wape": 8.724112203402374,
+    "folds_where_tuning_won": 0
+  }
+}
