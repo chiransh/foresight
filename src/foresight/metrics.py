@@ -28,3 +28,17 @@ def smape(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     if not mask.any():
         return float("nan")
     return float(np.mean(2 * np.abs(y_pred[mask] - y_true[mask]) / denom[mask]) * 100)
+
+
+def error_totals(y_true: np.ndarray, y_pred: np.ndarray) -> dict:
+    """Absolute error and sales volume, unnormalised.
+
+    Per-store rates cannot be recombined: weighting one store against another,
+    or comparing two models on the same store, needs the error and the sales it
+    is a share of rather than the ratio between them.
+    """
+    y_true, y_pred = np.asarray(y_true, dtype=float), np.asarray(y_pred, dtype=float)
+    return {
+        "abs_error": float(np.sum(np.abs(y_true - y_pred))),
+        "sales": float(np.sum(np.abs(y_true))),
+    }

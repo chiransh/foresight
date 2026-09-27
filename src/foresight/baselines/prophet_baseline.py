@@ -15,7 +15,7 @@ from prophet import Prophet
 
 from foresight.baselines._runner import run_cli
 from foresight.config import HOLDOUT_DAYS, SAMPLE_STORES
-from foresight.metrics import mape, smape, wape
+from foresight.metrics import error_totals, mape, smape, wape
 
 DATA_DIR = Path("data/raw")
 RESULTS_PATH = Path("evals/results/prophet.json")
@@ -62,6 +62,7 @@ def _fit_and_evaluate(
         "mape": mape(y_true, y_pred),
         "wape": wape(y_true, y_pred),
         "smape": smape(y_true, y_pred),
+        **error_totals(y_true, y_pred),
     }
 
 

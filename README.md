@@ -126,6 +126,18 @@ The distribution is tighter than the overall figure suggests: the 90th percentil
 
 That last point is worth stating because it is the kind of thing easy to assume: the worst-forecast shops are not the ones that shut often, they are mostly just small.
 
+### Do the three models fail on the same stores
+
+The breakdown above covers the served model family, so it says where that model struggles and nothing about whether the others struggle there too. The distinction decides something real: models that fail on different stores would argue for combining them rather than picking one. `foresight-cross-model` scores all three over the same folds and the same 1,115 stores and compares them store by store ([evals/cross-model.md](evals/cross-model.md)).
+
+**They largely fail on the same stores.** Each model's worst 111 stores overlap with another's on 42 to 59 of them, 38 to 53 percent where chance alone would give 10, with rank correlations of +0.52 to +0.68. Some of the difficulty belongs to the store rather than to the model.
+
+**There is almost nothing left for a per-store choice to win.** LightGBM is the better model on 1,039 of 1,115 stores, so giving every store the model that suits it best, chosen in hindsight, cuts WAPE from 8.66 to 8.62. That 0.04 is a ceiling, not a result: the model is picked using the window it is then scored on.
+
+**Choosing on past windows is worse than not choosing.** Picking each store's model on earlier folds and applying it to the next one is a wash in the first decision and reliably worse in the second, at -1.0 percent with an interval of -2.1 to -0.3. Of the stores moved off LightGBM, 38 to 50 percent actually improved, so the past window is close to a coin flip about which model suits a store. Serving three models to pick between them would cost accuracy as well as complexity.
+
+Averaging the forecasts rather than choosing between them is a different question, and one this rig cannot answer: it keeps per-store errors, not the row-level predictions an average needs.
+
 ## Backtesting design
 
 **Why not a single holdout split.** A holdout at the end of the series gives one number per model and no sense of whether it is stable. Rossmann has a strong December peak and promo-driven swings, so a window that happens to contain or miss those moves the result. Several folds show whether an advantage survives across periods. The numbers above are the evidence that this mattered.
@@ -200,6 +212,9 @@ foresight-baseline-prophet       # single-holdout run, logs to MLflow
 foresight-baseline-lightgbm
 foresight-baseline-nhits
 foresight-backtest               # all three across folds, writes evals/comparison.md
+foresight-tune --stores all      # randomised search, scored only on untouched windows
+foresight-diagnose               # per-store error for the served model
+foresight-cross-model            # whether all three models fail on the same stores
 
 foresight-train-model            # trains the quantile models the API serves
 uvicorn foresight.serving.app:app
@@ -240,7 +255,7 @@ Two tests guard the dashboard: panel datasource uids against the provisioned dat
 
 ## What I would change for production
 
-- **Diagnostics for the other two models.** The per-store breakdown covers the served model family only, so whether Prophet and NHITS fail on the same stores, or on different ones, is unmeasured. Models that fail on different stores would argue for combining them rather than picking one.
+- **Combining the forecasts, not choosing between them.** Per-store selection was measured and does not work, but averaging or stacking the three models is untested and is where the remaining gain would be if there is one. It needs the row-level predictions the backtest currently discards, since an averaged prediction's error cannot be recovered from per-store totals.
 - **A larger hyperparameter search, and one for the other two models.** Thirty random configurations did not beat the LightGBM defaults on held-out windows, but that rules out a modest search rather than tuning as such. Prophet and NHITS are still untuned, so the comparison remains one between default configurations.
 - **A challenger check that scales.** Each check trains a full challenger, which is cheap for LightGBM on 12 stores and would need a budget for a larger model or a tighter schedule. Twelve stores also make the bootstrap interval coarse, so smaller real gains go undetected; the full store set would resolve them.
 - **Distinguish holiday types.** The API maps every public holiday to Rossmann's generic code, but Easter and Christmas carry their own codes in the data and behave differently. Callers cannot say which kind a date is yet.
@@ -255,6 +270,10 @@ src/foresight/
   config.py            the pinned 12-store benchmark sample
   baselines/           Prophet, LightGBM, NHITS, each behind one shared CLI
   backtest.py          expanding-window folds, runs every model, writes comparison.md
+  diagnostics.py       per-store error for the served model, joined to store characteristics
+  cross_model.py       whether the three models fail on the same stores, and what that is worth
+  tuning.py            randomised search on the training window only
+  comparison.py        relative gain and the store-cluster bootstrap, shared
   tracking.py          MLflow logging shared by all baselines
   drift.py             PSI and KS tests, reported as context
   retraining.py        champion against challenger retrain check, replay, scheduler
@@ -264,11 +283,12 @@ src/foresight/
     metrics.py         Prometheus instrumentation
 evals/                 comparison.md and the raw result JSON per model
 notes/drift.md         three retraining triggers, and the replay that ruled out two
+notes/full-store-run.md  the scale test, and the claim about NHITS it disproved
 notebooks/01-eda.ipynb seasonality, missingness, store hierarchy
 grafana/, prometheus/  provisioned dashboard and scrape config
 ```
 
-105 tests, covering leakage in the feature pipeline, the metric definitions, fold construction, drift maths, the retraining decision rule and its bootstrap, a replay that must never touch the served model, calendar inputs on the API, the Grafana dashboard's agreement with what the app exports, the serving path's dependency boundary, that the tuning search never sees the window it is scored on, and that the diagnostic's generated wording tracks the numbers it reports.
+133 tests, covering leakage in the feature pipeline, the metric definitions, fold construction, drift maths, the retraining decision rule and its bootstrap, a replay that must never touch the served model, calendar inputs on the API, the Grafana dashboard's agreement with what the app exports, the serving path's dependency boundary, that the tuning search never sees the window it is scored on, that a per-store model choice is never scored on the window that picked it, and that the generated writeups' wording tracks the numbers they report.
 
 ## License
 

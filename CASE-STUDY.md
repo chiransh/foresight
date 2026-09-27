@@ -67,6 +67,12 @@ knowing because it tells a planner where to keep more slack, and it is not what
 most people guess: the worst-forecast shops are not the ones that close often.
 Those close 18 percent of days against an estate median of 17.
 
+## Would combining the three models help
+
+Picking one model and discarding two invites the question of whether the losers were better at anything. They were not, in any way worth acting on. The three fail on largely the same shops: each model's hundred-odd worst stores overlap with another's on 38 to 53 percent of them, where chance alone would give 10. Some of the difficulty belongs to the shop rather than to the model.
+
+The gradient booster is also the better model on 1,039 of the 1,115 stores, so handing every store the model that suited it best, chosen with hindsight, would improve the chain-wide error by 0.04 of a percentage point. Doing it honestly, by choosing each store's model on earlier months and applying it to the next, was worse than not choosing at all: of the shops moved off the winning model, fewer than half improved. Serving three models to pick between them would cost accuracy as well as complexity.
+
 ## What the measurement changed
 
 An earlier version of this project's writeup claimed the neural model lost
@@ -101,7 +107,7 @@ have retrained, and the retrained model would have been 0.6 percent worse.
 ## Stack
 
 Python, LightGBM, Prophet, NeuralForecast, pandas, FastAPI, MLflow, Prometheus,
-Grafana, Docker Compose, PostgreSQL. 105 automated tests, run on every commit.
+Grafana, Docker Compose, PostgreSQL. 133 automated tests, run on every commit.
 
 ## For engineers
 
@@ -112,4 +118,6 @@ Grafana, Docker Compose, PostgreSQL. 105 automated tests, run on every commit.
   replay that ruled out the first two.
 - [notes/full-store-run.md](notes/full-store-run.md) covers the scale test above.
 - [evals/store-diagnostics.md](evals/store-diagnostics.md) is the per-store breakdown.
+- [evals/cross-model.md](evals/cross-model.md) covers whether the three models fail on the same
+  stores, and what a per-store choice between them would be worth.
 - [evals/tuning.md](evals/tuning.md) covers the hyperparameter search and why it did not help.

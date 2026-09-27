@@ -66,25 +66,24 @@ def _run_model_fold(
     test_end: pd.Timestamp,
     out_path: Path,
     stores: str = "sample",
+    track: bool = True,
 ) -> dict:
-    subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            module,
-            "--train-end",
-            train_end.date().isoformat(),
-            "--test-end",
-            test_end.date().isoformat(),
-            "--stores",
-            stores,
-            "--out",
-            str(out_path),
-        ],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    command = [
+        sys.executable,
+        "-m",
+        module,
+        "--train-end",
+        train_end.date().isoformat(),
+        "--test-end",
+        test_end.date().isoformat(),
+        "--stores",
+        stores,
+        "--out",
+        str(out_path),
+    ]
+    if not track:
+        command.append("--no-tracking")
+    subprocess.run(command, check=True, capture_output=True, text=True)
     return json.loads(out_path.read_text())
 
 

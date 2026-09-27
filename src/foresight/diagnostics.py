@@ -213,6 +213,12 @@ def _tail_note(summary: dict) -> str:
 
 
 def _spearman_note(value: float, name: str) -> str:
+    # A characteristic that never varies has no defined rank correlation. Falling
+    # through the bands below would print "a clear rank correlation (nan)", which
+    # is the strongest wording here attached to no measurement at all.
+    if np.isnan(value):
+        return f"{name} does not vary across these stores, so no rank correlation can be computed."
+
     strength = "no" if abs(value) < 0.2 else "a weak" if abs(value) < 0.4 else "a clear"
     direction = "higher" if value > 0 else "lower"
     if strength == "no":

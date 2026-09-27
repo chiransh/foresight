@@ -20,8 +20,8 @@ from foresight.diagnostics import (
 
 def _per_store(wapes: list[float], sales: list[float] | None = None, closures: list[float] | None = None):
     n = len(wapes)
-    sales = sales or [100_000.0] * n
-    closures = closures or [0.17] * n
+    sales = sales or [100_000.0 + 500 * i for i in range(n)]
+    closures = closures or [0.17 + 0.001 * (i % 7) for i in range(n)]
     return pd.DataFrame(
         {
             "Store": range(1, n + 1),
@@ -30,7 +30,7 @@ def _per_store(wapes: list[float], sales: list[float] | None = None, closures: l
             "abs_error": [w / 100 * s for w, s in zip(wapes, sales)],
             "n_scored_days": [120] * n,
             "mean_daily_sales": [s / 120 for s in sales],
-            "open_days": [900] * n,
+            "open_days": [900 + i % 5 for i in range(n)],
             "total_days": [1000] * n,
             "closure_rate": closures,
             "StoreType": ["a" if i % 2 else "d" for i in range(n)],
@@ -107,6 +107,17 @@ def test_error_in_line_with_sales_says_so():
 def test_a_weak_correlation_is_not_reported_as_a_relationship():
     assert "no rank correlation" in _spearman_note(0.17, "Closure rate")
     assert "no rank correlation" in _spearman_note(-0.19, "History")
+
+
+def test_a_characteristic_that_never_varies_is_not_reported_as_a_clear_correlation():
+    """Spearman is undefined on a constant column and returns NaN. Every band in
+    the wording is an abs() comparison, and NaN fails all of them, so the note
+    fell through to the strongest one."""
+    note = _spearman_note(float("nan"), "Closure rate")
+
+    assert "no rank correlation can be computed" in note
+    assert "clear" not in note
+    assert "nan" not in note
 
 
 def test_a_real_correlation_names_its_direction():
