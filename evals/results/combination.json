@@ -122,6 +122,197 @@
           }
         }
       }
+    ],
+    "scope_decisions": [
+      {
+        "fold": 2,
+        "fitted_on_folds": [
+          1
+        ],
+        "champion": "lightgbm",
+        "scopes": {
+          "global": {
+            "n_segments_fitted": 0,
+            "wape": 8.32690777200787,
+            "gain_over_champion": 0.012559524506334992,
+            "ci_lower": 0.01183047903331846,
+            "ci_upper": 0.013249883426721886,
+            "gain_over_global": 0.0,
+            "global_ci_lower": 0.0,
+            "global_ci_upper": 0.0,
+            "weights": {}
+          },
+          "store_type": {
+            "n_segments_fitted": 3,
+            "wape": 8.278245829030489,
+            "gain_over_champion": 0.018330066636459228,
+            "ci_lower": 0.01695870352112745,
+            "ci_upper": 0.01967325597913426,
+            "gain_over_global": 0.005843939228072748,
+            "global_ci_lower": 0.004933235547741979,
+            "global_ci_upper": 0.006749029358119314,
+            "weights": {
+              "__global__": {
+                "prophet": 0.0543,
+                "lightgbm": 0.9457,
+                "nhits": 0.0
+              },
+              "a": {
+                "prophet": 0.1144,
+                "lightgbm": 0.8766,
+                "nhits": 0.009
+              },
+              "c": {
+                "prophet": 0.0,
+                "lightgbm": 1.0,
+                "nhits": 0.0
+              },
+              "d": {
+                "prophet": 0.0627,
+                "lightgbm": 0.9373,
+                "nhits": 0.0
+              }
+            }
+          },
+          "volume_quintile": {
+            "n_segments_fitted": 5,
+            "wape": 8.303570391760788,
+            "gain_over_champion": 0.015326971255946075,
+            "ci_lower": 0.01403493995589797,
+            "ci_upper": 0.01670259933738584,
+            "gain_over_global": 0.002802646659007486,
+            "global_ci_lower": 0.0016559107827966832,
+            "global_ci_upper": 0.003957107384922283,
+            "weights": {
+              "__global__": {
+                "prophet": 0.0543,
+                "lightgbm": 0.9457,
+                "nhits": 0.0
+              },
+              "0": {
+                "prophet": 0.1137,
+                "lightgbm": 0.8119,
+                "nhits": 0.0743
+              },
+              "1": {
+                "prophet": 0.0829,
+                "lightgbm": 0.8658,
+                "nhits": 0.0513
+              },
+              "2": {
+                "prophet": 0.0683,
+                "lightgbm": 0.9317,
+                "nhits": 0.0
+              },
+              "3": {
+                "prophet": 0.0499,
+                "lightgbm": 0.9501,
+                "nhits": 0.0
+              },
+              "4": {
+                "prophet": 0.0,
+                "lightgbm": 1.0,
+                "nhits": 0.0
+              }
+            }
+          }
+        }
+      },
+      {
+        "fold": 3,
+        "fitted_on_folds": [
+          1,
+          2
+        ],
+        "champion": "lightgbm",
+        "scopes": {
+          "global": {
+            "n_segments_fitted": 0,
+            "wape": 7.91515866648332,
+            "gain_over_champion": 0.026003674399888096,
+            "ci_lower": 0.023582441109794558,
+            "ci_upper": 0.028475854337269617,
+            "gain_over_global": 0.0,
+            "global_ci_lower": 0.0,
+            "global_ci_upper": 0.0,
+            "weights": {}
+          },
+          "store_type": {
+            "n_segments_fitted": 3,
+            "wape": 7.918026745833277,
+            "gain_over_champion": 0.025650744172447653,
+            "ci_lower": 0.022809203446973198,
+            "ci_upper": 0.028452273443971356,
+            "gain_over_global": -0.0003623527298452489,
+            "global_ci_lower": -0.001528034257144671,
+            "global_ci_upper": 0.0007410119904793939,
+            "weights": {
+              "__global__": {
+                "prophet": 0.1073,
+                "lightgbm": 0.8394,
+                "nhits": 0.0533
+              },
+              "a": {
+                "prophet": 0.1256,
+                "lightgbm": 0.7841,
+                "nhits": 0.0902
+              },
+              "c": {
+                "prophet": 0.0152,
+                "lightgbm": 0.9809,
+                "nhits": 0.0039
+              },
+              "d": {
+                "prophet": 0.1312,
+                "lightgbm": 0.8311,
+                "nhits": 0.0377
+              }
+            }
+          },
+          "volume_quintile": {
+            "n_segments_fitted": 5,
+            "wape": 7.912300055282588,
+            "gain_over_champion": 0.02635543952844072,
+            "ci_lower": 0.023886387738645765,
+            "ci_upper": 0.02880614943982102,
+            "gain_over_global": 0.0003611565252424254,
+            "global_ci_lower": -0.0005319910372309208,
+            "global_ci_upper": 0.0012448866848712428,
+            "weights": {
+              "__global__": {
+                "prophet": 0.1073,
+                "lightgbm": 0.8394,
+                "nhits": 0.0533
+              },
+              "0": {
+                "prophet": 0.1428,
+                "lightgbm": 0.763,
+                "nhits": 0.0942
+              },
+              "1": {
+                "prophet": 0.1356,
+                "lightgbm": 0.7771,
+                "nhits": 0.0873
+              },
+              "2": {
+                "prophet": 0.1257,
+                "lightgbm": 0.8249,
+                "nhits": 0.0495
+              },
+              "3": {
+                "prophet": 0.1077,
+                "lightgbm": 0.8408,
+                "nhits": 0.0516
+              },
+              "4": {
+                "prophet": 0.0703,
+                "lightgbm": 0.8997,
+                "nhits": 0.03
+              }
+            }
+          }
+        }
+      }
     ]
   }
 }

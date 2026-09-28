@@ -91,6 +91,11 @@ a decision about operating cost, not about accuracy.
 A fixed equal-weighted average, the version most people reach for first, was
 reliably worse than the single model in both periods.
 
+Fitting a separate blend for each kind of shop, or for each size band, was also
+tried. It helped in one of the two periods by about half of one percent and did
+nothing in the other, which is not enough to justify maintaining several sets of
+weights, so the blend stays a single one for the whole chain.
+
 ## What the measurement changed
 
 An earlier version of this project's writeup claimed the neural model lost
@@ -125,7 +130,7 @@ have retrained, and the retrained model would have been 0.6 percent worse.
 ## Stack
 
 Python, LightGBM, Prophet, NeuralForecast, pandas, FastAPI, MLflow, Prometheus,
-Grafana, Docker Compose, PostgreSQL. 156 automated tests, run on every commit.
+Grafana, Docker Compose, PostgreSQL. 172 automated tests, run on every commit.
 
 ## For engineers
 

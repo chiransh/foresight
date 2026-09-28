@@ -18,15 +18,19 @@ import pandas as pd
 from foresight.combination import (
     _headline,
     _rule_verdict,
+    _scope_verdict,
     combined_prediction,
     equal_weights,
     evaluate,
     inverse_error_weights,
+    combined_by_segment,
+    evaluate_scopes,
     join_predictions,
     least_squares_weights,
     model_wapes,
     report,
     summarise,
+    weights_by_segment,
 )
 
 MODELS = ["prophet", "lightgbm", "nhits"]
@@ -297,3 +301,212 @@ def test_the_whole_result_survives_json_serialisation():
 def test_the_report_states_the_leakage_boundary():
     text = report(summarise(_noisy(2, 10, 10, {m: 50.0 for m in MODELS})))
     assert "before the one" in text and "weights fitted on" in text
+
+
+# Fitting per segment ------------------------------------------------------------
+
+
+def _segmented(
+    folds: int, stores: int, days: int, sigmas_by_type: dict[str, dict[str, float]], seed: int = 0
+) -> pd.DataFrame:
+    """Rows where the models' relative strength differs by store type, which is
+    the only case per-segment weights exist for."""
+    rng = np.random.default_rng(seed)
+    types = list(sigmas_by_type)
+
+    specs = []
+    for fold in range(1, folds + 1):
+        for store in range(1, stores + 1):
+            store_type = types[store % len(types)]
+            for _ in range(days):
+                y = 1000 + 20 * store
+                specs.append(
+                    (
+                        fold,
+                        store,
+                        y,
+                        {m: y + rng.normal(0, s) for m, s in sigmas_by_type[store_type].items()},
+                        store_type,
+                    )
+                )
+
+    frame = pd.DataFrame(
+        [
+            {"fold": fold, "Store": store, "y_true": y, **predictions, "store_type": store_type}
+            for fold, store, y, predictions, store_type in specs
+        ]
+    )
+    frame["Date"] = pd.Timestamp("2015-06-01") + pd.to_timedelta(frame.index % 40, unit="D")
+    frame["volume_quintile"] = (frame.Store % 5).astype(str)
+    return frame
+
+
+OPPOSED = {
+    "a": {"lightgbm": 30.0, "prophet": 150.0, "nhits": 200.0},
+    "d": {"lightgbm": 150.0, "prophet": 30.0, "nhits": 200.0},
+}
+
+
+def test_a_segment_with_too_little_history_keeps_the_global_weights():
+    """Rossmann has 17 stores of one type. Three free parameters fitted on a
+    handful of stores is how a segment model ends up worse than the global one."""
+    history = _segmented(1, 20, 20, OPPOSED)
+    fitted = weights_by_segment(history, MODELS, "store_type", minimum_rows=10_000)
+
+    assert list(fitted) == ["__global__"]
+
+
+def test_a_segment_above_the_floor_is_fitted_on_its_own_rows():
+    history = _segmented(1, 80, 40, OPPOSED)
+    fitted = weights_by_segment(history, MODELS, "store_type", minimum_rows=500)
+
+    assert set(fitted) == {"__global__", "a", "d"}
+    assert fitted["a"]["lightgbm"] > fitted["a"]["prophet"]
+    assert fitted["d"]["prophet"] > fitted["d"]["lightgbm"], "the segments must not share a fit"
+
+
+def test_a_segment_absent_from_the_fit_falls_back_rather_than_failing():
+    """A store type that appears only in the scored window has no weights of its
+    own, and must not take the whole fold down with it."""
+    scored = _segmented(1, 20, 20, OPPOSED)
+    fitted = {"__global__": {m: 1 / 3 for m in MODELS}, "a": {"lightgbm": 1.0, "prophet": 0.0, "nhits": 0.0}}
+
+    combined = combined_by_segment(scored, fitted, "store_type")
+
+    assert not combined.isna().any()
+    assert len(combined) == len(scored)
+
+
+def test_every_row_gets_exactly_one_segments_weights():
+    scored = _segmented(1, 20, 20, OPPOSED)
+    fitted = {
+        "__global__": {m: 1 / 3 for m in MODELS},
+        "a": {"lightgbm": 1.0, "prophet": 0.0, "nhits": 0.0},
+        "d": {"lightgbm": 0.0, "prophet": 1.0, "nhits": 0.0},
+    }
+    combined = combined_by_segment(scored, fitted, "store_type")
+
+    type_a = scored.store_type == "a"
+    assert (combined[type_a] == scored.lightgbm[type_a]).all()
+    assert (combined[~type_a] == scored.prophet[~type_a]).all()
+
+
+def test_segment_weights_are_fitted_on_earlier_folds_only():
+    rows = _segmented(2, 80, 40, OPPOSED)
+    decision = evaluate_scopes(rows, minimum_rows=500)[0]
+
+    assert decision["fitted_on_folds"] == [1]
+    assert set(decision["scopes"]) == {"global", "store_type", "volume_quintile"}
+
+
+def test_segments_that_genuinely_differ_are_found_to_beat_one_global_fit():
+    """If the rig could not detect this it would not be measuring anything: here
+    each type's best model is the other type's worst."""
+    entry = evaluate_scopes(_segmented(2, 80, 40, OPPOSED), minimum_rows=500)[0]["scopes"]["store_type"]
+
+    assert entry["n_segments_fitted"] == 2
+    assert entry["gain_over_global"] > 0.3
+    assert entry["global_ci_lower"] > 0
+
+
+def test_segments_that_do_not_differ_show_no_gain_over_one_global_fit():
+    same = {"a": {"lightgbm": 40.0, "prophet": 120.0, "nhits": 160.0}}
+    same["d"] = same["a"]
+    entry = evaluate_scopes(_segmented(2, 80, 40, same), minimum_rows=500)[0]["scopes"]["store_type"]
+
+    assert entry["n_segments_fitted"] == 2, "otherwise this passes by falling back to one fit"
+    assert entry["ci_lower"] > 0, "the combination should still beat the single model"
+    assert entry["global_ci_lower"] <= 0 <= entry["global_ci_upper"], (
+        "splitting a fit that did not need splitting must not read as a gain"
+    )
+
+
+def test_the_global_scope_is_its_own_reference():
+    entry = evaluate_scopes(_segmented(2, 80, 40, OPPOSED), minimum_rows=500)[0]["scopes"]["global"]
+
+    assert entry["gain_over_global"] == 0.0
+    assert entry["n_segments_fitted"] == 0
+
+
+def test_a_frame_without_segment_labels_is_still_summarised():
+    """A frame assembled by hand for a test should not have to know about
+    segments, and an older results file did not carry them."""
+    summary = summarise(_noisy(2, 10, 10, {m: 50.0 for m in MODELS}))
+    assert "scope_decisions" not in summary
+
+
+# The written verdict, per scope --------------------------------------------------
+
+
+def _scope_decisions(entries: list[tuple[float, float, float]], segments_fitted: int = 4) -> list[dict]:
+    return [
+        {
+            "fold": i + 2,
+            "fitted_on_folds": [1],
+            "champion": "lightgbm",
+            "scopes": {
+                "store_type": {
+                    "n_segments_fitted": segments_fitted,
+                    "wape": 8.0,
+                    "gain_over_champion": 0.02,
+                    "ci_lower": 0.01,
+                    "ci_upper": 0.03,
+                    "gain_over_global": gain,
+                    "global_ci_lower": lower,
+                    "global_ci_upper": upper,
+                    "weights": {},
+                }
+            },
+        }
+        for i, (gain, lower, upper) in enumerate(entries)
+    ]
+
+
+def test_a_split_that_never_separates_is_not_reported_as_a_gain():
+    verdict = _scope_verdict(_scope_decisions([(0.001, -0.004, 0.006), (-0.002, -0.007, 0.003)]), "store_type")
+
+    assert "does not separate" in verdict
+    assert "pay for themselves" not in verdict
+
+
+def test_a_split_that_is_reliably_worse_says_the_fit_lost_data():
+    verdict = _scope_verdict(_scope_decisions([(-0.02, -0.03, -0.01), (-0.03, -0.04, -0.02)]), "store_type")
+
+    assert "reliably worse" in verdict
+    assert "fraction of the data" in verdict
+
+
+def test_a_split_that_helps_once_and_hurts_once_is_not_deployable():
+    verdict = _scope_verdict(_scope_decisions([(0.02, 0.01, 0.03), (-0.02, -0.03, -0.01)]), "store_type")
+
+    assert "not a split to deploy" in verdict
+
+
+def test_a_split_that_always_wins_says_the_weights_pay_for_themselves():
+    verdict = _scope_verdict(_scope_decisions([(0.05, 0.03, 0.07), (0.04, 0.02, 0.06)]), "store_type")
+
+    assert "pay for themselves" in verdict
+
+
+def test_the_verdict_states_how_many_segments_were_actually_fitted():
+    verdict = _scope_verdict(_scope_decisions([(0.0, -0.01, 0.01)], segments_fitted=3), "store_type")
+    assert "3 segments fitted separately" in verdict
+
+
+def test_a_split_that_separates_in_one_decision_is_not_reported_as_separating_in_none():
+    """Regression, and the same fall-through the per-rule verdict had: with one
+    interval above zero and one spanning it, neither the all-better nor the
+    better-and-worse branch fires, and the catch-all claimed no decision
+    separated while the table above it showed one that did."""
+    verdict = _scope_verdict(_scope_decisions([(0.0058, 0.0049, 0.0067), (-0.0004, -0.0015, 0.0007)]), "store_type")
+
+    assert "1 of 2 decisions" in verdict
+    assert "does not separate from one global fit in any decision" not in verdict
+    assert "revisit" in verdict
+
+
+def test_a_split_that_is_worse_once_and_no_better_otherwise_says_so():
+    verdict = _scope_verdict(_scope_decisions([(-0.02, -0.03, -0.01), (0.0, -0.01, 0.01)]), "store_type")
+
+    assert "reliably worse in 1 of 2" in verdict
+    assert "no better in the rest" in verdict

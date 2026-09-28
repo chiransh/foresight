@@ -44,11 +44,23 @@ from foresight.backtest import (
 )
 from foresight.comparison import bootstrap_gain, relative_gain
 from foresight.config import resolve_stores
+from foresight.diagnostics import VOLUME_QUINTILES, store_characteristics
 
 RESULTS_PATH = Path("evals/results/combination.json")
 REPORT_PATH = Path("evals/combination.md")
 
 RULES = ("equal", "inverse_error", "least_squares")
+
+# Scopes the winning rule's weights can be fitted at. Only the winning rule is
+# asked this question: whether to fit a losing rule per segment is not a decision
+# anyone has to make.
+SCOPES = ("global", "store_type", "volume_quintile")
+
+# A segment with fewer scored rows than this in the history window falls back to
+# the global weights. Rossmann has 17 stores of one type, and three free
+# parameters fitted on a handful of stores is how a segment model gets worse than
+# the global one it replaced.
+MIN_SEGMENT_ROWS = 2000
 
 
 def collect(stores: str = "all", n_folds: int = N_FOLDS, data_dir: Path = DATA_DIR) -> pd.DataFrame:
@@ -78,7 +90,8 @@ def collect(stores: str = "all", n_folds: int = N_FOLDS, data_dir: Path = DATA_D
 
             pieces.append(join_predictions(frames, models).assign(fold=i))
 
-    return pd.concat(pieces, ignore_index=True)
+    rows = pd.concat(pieces, ignore_index=True)
+    return rows.merge(segments(sorted(rows.Store.unique()), data_dir), on="Store", how="left")
 
 
 def join_predictions(frames: dict[str, pd.DataFrame], models: list[str]) -> pd.DataFrame:
@@ -244,17 +257,140 @@ def evaluate(rows: pd.DataFrame, seed: int = 0) -> list[dict]:
     return decisions
 
 
+def segments(stores: list[int], data_dir: Path = DATA_DIR) -> pd.DataFrame:
+    """A segment label per store, for the scopes weights can be fitted at.
+
+    Store type comes from the dataset. Volume quintiles are cut on mean daily
+    sales, which is the one store characteristic the per-store diagnostics found
+    to predict error at all, so it is the segmentation with a reason behind it
+    rather than one chosen for being available.
+    """
+    characteristics = store_characteristics(data_dir, stores)
+    quintiles = pd.qcut(
+        characteristics.mean_daily_sales, VOLUME_QUINTILES, labels=False, duplicates="drop"
+    )
+    return pd.DataFrame(
+        {
+            "Store": characteristics.Store.astype(int),
+            "store_type": characteristics.StoreType.astype(str),
+            "volume_quintile": quintiles.astype(int).astype(str),
+        }
+    )
+
+
+def weights_by_segment(
+    history: pd.DataFrame, models: list[str], scope: str, minimum_rows: int = MIN_SEGMENT_ROWS
+) -> dict[str, dict[str, float]]:
+    """Least-squares weights per segment, with the global fit as the fallback.
+
+    A segment too thin to fit on keeps the global weights rather than getting
+    three parameters of its own, and the count is taken from the history window
+    because that is what the fit actually sees.
+    """
+    fitted = {"__global__": least_squares_weights(history, models)}
+    for segment, group in history.groupby(scope, observed=True):
+        if len(group) >= minimum_rows:
+            fitted[str(segment)] = least_squares_weights(group, models)
+    return fitted
+
+
+def combined_by_segment(
+    scored: pd.DataFrame, fitted: dict[str, dict[str, float]], scope: str
+) -> pd.Series:
+    combined = pd.Series(0.0, index=scored.index)
+    for segment, group in scored.groupby(scope, observed=True):
+        weights = fitted.get(str(segment), fitted["__global__"])
+        combined.loc[group.index] = combined_prediction(group, weights)
+    return combined
+
+
+def evaluate_scopes(
+    rows: pd.DataFrame, seed: int = 0, minimum_rows: int = MIN_SEGMENT_ROWS
+) -> list[dict]:
+    """Whether fitting the winning rule per segment beats fitting it globally.
+
+    Two comparisons per scope, because they answer different things: against the
+    single model, which is what deploying either would replace, and against the
+    global combination, which is the question of whether the extra weights pay
+    for themselves.
+    """
+    models = [model for model in MODEL_MODULES if model in rows.columns]
+    folds = sorted(rows.fold.unique())
+
+    decisions = []
+    for i, fold in enumerate(folds):
+        if i == 0:
+            continue
+        history = rows[rows.fold.isin(folds[:i])]
+        scored = rows[rows.fold == fold]
+        champion = min(models, key=lambda model: (history.y_true - history[model]).abs().sum())
+
+        global_combined = combined_prediction(scored, least_squares_weights(history, models))
+
+        scope_results = {}
+        for scope in SCOPES:
+            if scope == "global":
+                combined, fitted = global_combined, {}
+            else:
+                fitted = weights_by_segment(history, models, scope, minimum_rows=minimum_rows)
+                combined = combined_by_segment(scored, fitted, scope)
+
+            against_champion = _per_store_errors(scored, champion, combined)
+            lower, upper = bootstrap_gain(against_champion, seed=seed)
+
+            versus_global = pd.DataFrame(
+                {
+                    "Store": scored.Store.to_numpy(),
+                    "champion": (scored.y_true - global_combined).abs().to_numpy(),
+                    "challenger": (scored.y_true - combined).abs().to_numpy(),
+                }
+            ).groupby("Store", observed=True)[["champion", "challenger"]].sum()
+            global_lower, global_upper = bootstrap_gain(versus_global, seed=seed)
+
+            scope_results[scope] = {
+                "n_segments_fitted": max(0, len(fitted) - 1),
+                "wape": float(
+                    (scored.y_true - combined).abs().sum() / scored.y_true.abs().sum() * 100
+                ),
+                "gain_over_champion": relative_gain(against_champion),
+                "ci_lower": lower,
+                "ci_upper": upper,
+                "gain_over_global": relative_gain(versus_global),
+                "global_ci_lower": global_lower,
+                "global_ci_upper": global_upper,
+                "weights": {
+                    segment: {model: round(weight, 4) for model, weight in weights.items()}
+                    for segment, weights in fitted.items()
+                },
+            }
+
+        decisions.append(
+            {
+                "fold": int(fold),
+                "fitted_on_folds": [int(f) for f in folds[:i]],
+                "champion": champion,
+                "scopes": scope_results,
+            }
+        )
+
+    return decisions
+
+
 def summarise(rows: pd.DataFrame, seed: int = 0) -> dict:
     models = [model for model in MODEL_MODULES if model in rows.columns]
-    decisions = evaluate(rows, seed=seed)
-    return {
+    summary = {
         "models": models,
         "n_folds": int(rows.fold.nunique()),
         "n_rows": len(rows),
         "n_stores": int(rows.Store.nunique()),
         "overall_model_wapes": model_wapes(rows, models),
-        "decisions": decisions,
+        "decisions": evaluate(rows, seed=seed),
     }
+    # Only when the rows carry segment labels, so a frame assembled by hand for a
+    # test does not have to know about segments to be summarised.
+    if all(scope in rows.columns for scope in SCOPES if scope != "global"):
+        summary["scope_decisions"] = evaluate_scopes(rows, seed=seed)
+    return summary
 
 
 def _rule_verdict(name: str, decisions: list[dict]) -> str:
@@ -336,6 +472,92 @@ def _headline(summary: dict) -> str:
     )
 
 
+def _scope_verdict(decisions: list[dict], scope: str) -> str:
+    entries = [decision["scopes"][scope] for decision in decisions]
+    better = [entry for entry in entries if entry["global_ci_lower"] > 0]
+    worse = [entry for entry in entries if entry["global_ci_upper"] < 0]
+    mean_gain = float(np.mean([entry["gain_over_global"] for entry in entries]))
+    segments_fitted = max(entry["n_segments_fitted"] for entry in entries)
+
+    opening = f"**{scope}**, {segments_fitted} segments fitted separately: "
+    if len(better) == len(entries):
+        return (
+            f"{opening}beats one global fit in every decision, by {mean_gain * 100:.1f} percent of "
+            "its error on average. The extra weights pay for themselves."
+        )
+    if len(worse) == len(entries):
+        return (
+            f"{opening}reliably worse than one global fit in every decision, by "
+            f"{abs(mean_gain) * 100:.1f} percent. Splitting the fit costs accuracy: each segment's "
+            "weights see a fraction of the data and the segments do not differ enough to make up "
+            "for it."
+        )
+    if better and worse:
+        return (
+            f"{opening}better in {len(better)} decision and worse in {len(worse)}, averaging "
+            f"{mean_gain * 100:+.1f} percent. A split that helps in one period and hurts in another "
+            "is not a split to deploy."
+        )
+    # Separating in some decisions and not others is its own answer, and the
+    # catch-all below would report it as separating in none.
+    if better:
+        return (
+            f"{opening}beats one global fit in {len(better)} of {len(entries)} decisions and does "
+            f"not separate in the rest, averaging {mean_gain * 100:+.1f} percent. Too small and too "
+            "inconsistent to deploy on, and the direction is at least the right one, so this is the "
+            "split to revisit if the members ever differ more by segment than they do here."
+        )
+    if worse:
+        return (
+            f"{opening}reliably worse in {len(worse)} of {len(entries)} decisions and no better in "
+            f"the rest, averaging {mean_gain * 100:+.1f} percent."
+        )
+    return (
+        f"{opening}does not separate from one global fit in any decision, averaging "
+        f"{mean_gain * 100:+.1f} percent. The segments are not different enough to be worth fitting "
+        "apart, on this much data."
+    )
+
+
+def _scope_section(summary: dict) -> list[str]:
+    decisions = summary.get("scope_decisions")
+    if not decisions:
+        return []
+
+    lines = [
+        "## Should the winning rule be fitted per segment",
+        "",
+        "The weights above are global. Fitting them per segment lets the mix differ where the "
+        "models' relative strength differs, and costs data: each segment's weights see a fraction "
+        "of the rows. Only the least-squares rule is asked, since it is the only one worth "
+        "deploying, and a segment with too little history keeps the global weights rather than "
+        "getting three parameters of its own.",
+        "",
+        "| Fold | Scope | Segments fitted | WAPE | Against one global fit | 95% interval |",
+        "|---|---|---|---|---|---|",
+    ]
+    for decision in decisions:
+        for scope in SCOPES:
+            entry = decision["scopes"][scope]
+            against = "reference" if scope == "global" else f"{entry['gain_over_global'] * 100:+.2f}%"
+            interval = (
+                ""
+                if scope == "global"
+                else f"{entry['global_ci_lower'] * 100:+.2f}% to {entry['global_ci_upper'] * 100:+.2f}%"
+            )
+            lines.append(
+                f"| {decision['fold']} | {scope} | {entry['n_segments_fitted']} | "
+                f"{entry['wape']:.2f} | {against} | {interval} |"
+            )
+
+    lines.append("")
+    for scope in SCOPES:
+        if scope != "global":
+            lines += [_scope_verdict(decisions, scope), ""]
+
+    return lines
+
+
 def report(summary: dict) -> str:
     lines = [
         "# Combining the three forecasts",
@@ -380,13 +602,16 @@ def report(summary: dict) -> str:
     for name in RULES:
         lines += [_rule_verdict(name, summary["decisions"]), ""]
 
+    lines += _scope_section(summary)
+
     lines += [
         "## Caveats",
         "",
         "- All three members run at default hyperparameters. A combination of tuned models could "
         "behave differently, though the tuning run found no gain to be had on the winner.",
-        "- Weights are global, not per store. Per-store weights would be fitted on a fortieth as "
-        "much data each, and the per-store selection this follows already showed how poorly a "
+        "- Weights per individual store are still untested. Segments were tried because they sit "
+        "between one global fit and a fit per store; a per-store fit would see a fortieth as much "
+        "data again, and the per-store model selection this follows already showed how poorly a "
         "per-store choice made on one window transfers to the next.",
         "- Non-negative least squares fits the level as well as the shape, so its weights are not "
         "directly comparable with the inverse-error ones beyond their ordering.",

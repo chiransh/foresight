@@ -153,6 +153,16 @@ Selection failing does not settle combination, which is a different mechanism: a
 
 So the answer to the two questions is not the same. Choosing between the models per store costs accuracy; combining them with fitted weights buys about 2 percent of the error, for the cost of running three models instead of one.
 
+**Fitting those weights per segment adds nothing worth having.** The obvious next question is whether the mix should differ by store type or by size, which sits between one global fit and a fit per store. Both were tried, with each segment's weights fitted on the earlier folds and a segment too thin to fit on keeping the global weights, which is what happens to the 17 type-b stores.
+
+| Scope | Segments fitted | Fold 2 | Fold 3 |
+|---|---|---|---|
+| one global fit | 0 | 8.33 | 7.92 |
+| by store type | 3 | 8.28 | 7.92 |
+| by volume quintile | 5 | 8.30 | 7.91 |
+
+Each beats the single global fit in fold 2, by 0.58 and 0.28 percent of its error with intervals above zero, and neither separates from it in fold 3. A gain that size, present in one window of two, is not something to add five sets of weights and a fallback rule for. It is the right direction though, so it is the thing to revisit if the models ever differ more by segment than they do here, which the per-store diagnostics suggest they do not: no store segment is a weak spot for the winner.
+
 ## Backtesting design
 
 **Why not a single holdout split.** A holdout at the end of the series gives one number per model and no sense of whether it is stable. Rossmann has a strong December peak and promo-driven swings, so a window that happens to contain or miss those moves the result. Several folds show whether an advantage survives across periods. The numbers above are the evidence that this mattered.
@@ -272,7 +282,7 @@ Two tests guard the dashboard: panel datasource uids against the provisioned dat
 ## What I would change for production
 
 - **Serving the combination, not just scoring it.** The least-squares combination is measured and works, but the API serves a single LightGBM model. Serving it means running Prophet and NHITS in production, refitting the weights on a schedule, and quantile intervals for a weighted sum, which is a larger change than the 2 percent it buys may justify. That trade is the decision, and it should be made on a cost estimate rather than on the accuracy number alone.
-- **Weights per store or per segment.** The weights fitted here are global. Per-store weights would be fitted on a fortieth as much data each, and the per-store selection result suggests they would transfer badly, but a segment between the two, by store type or by volume quintile, is untested.
+- **Weights per store.** Segment weights were tested and are not worth the machinery. A fit per individual store sees a fortieth as much data again, and the per-store selection result suggests it would transfer badly, so the interesting version is a shrunk estimate: each store's own fit pulled toward the global one by how little data supports it.
 - **A larger hyperparameter search, and one for the other two models.** Thirty random configurations did not beat the LightGBM defaults on held-out windows, but that rules out a modest search rather than tuning as such. Prophet and NHITS are still untuned, so the comparison remains one between default configurations.
 - **A challenger check that scales.** Each check trains a full challenger, which is cheap for LightGBM on 12 stores and would need a budget for a larger model or a tighter schedule. Twelve stores also make the bootstrap interval coarse, so smaller real gains go undetected; the full store set would resolve them.
 - **Distinguish holiday types.** The API maps every public holiday to Rossmann's generic code, but Easter and Christmas carry their own codes in the data and behave differently. Callers cannot say which kind a date is yet.
@@ -306,7 +316,7 @@ notebooks/01-eda.ipynb seasonality, missingness, store hierarchy
 grafana/, prometheus/  provisioned dashboard and scrape config
 ```
 
-156 tests, covering leakage in the feature pipeline, the metric definitions, fold construction, drift maths, the retraining decision rule and its bootstrap, a replay that must never touch the served model, calendar inputs on the API, the Grafana dashboard's agreement with what the app exports, the serving path's dependency boundary, that the tuning search never sees the window it is scored on, that neither a per-store model choice nor a combination weight is ever scored on the window that produced it, and that the generated writeups' wording tracks the numbers they report.
+172 tests, covering leakage in the feature pipeline, the metric definitions, fold construction, drift maths, the retraining decision rule and its bootstrap, a replay that must never touch the served model, calendar inputs on the API, the Grafana dashboard's agreement with what the app exports, the serving path's dependency boundary, that the tuning search never sees the window it is scored on, that neither a per-store model choice nor a combination weight is ever scored on the window that produced it, and that the generated writeups' wording tracks the numbers they report.
 
 ## License
 

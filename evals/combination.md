@@ -42,10 +42,27 @@ Deployed single model: lightgbm at 8.13 WAPE over 1,115 stores.
 
 **least_squares** beats the single best model in every decision, by 1.9 percent of its error on average, with every interval above zero. This is the rule to use.
 
+## Should the winning rule be fitted per segment
+
+The weights above are global. Fitting them per segment lets the mix differ where the models' relative strength differs, and costs data: each segment's weights see a fraction of the rows. Only the least-squares rule is asked, since it is the only one worth deploying, and a segment with too little history keeps the global weights rather than getting three parameters of its own.
+
+| Fold | Scope | Segments fitted | WAPE | Against one global fit | 95% interval |
+|---|---|---|---|---|---|
+| 2 | global | 0 | 8.33 | reference |  |
+| 2 | store_type | 3 | 8.28 | +0.58% | +0.49% to +0.67% |
+| 2 | volume_quintile | 5 | 8.30 | +0.28% | +0.17% to +0.40% |
+| 3 | global | 0 | 7.92 | reference |  |
+| 3 | store_type | 3 | 7.92 | -0.04% | -0.15% to +0.07% |
+| 3 | volume_quintile | 5 | 7.91 | +0.04% | -0.05% to +0.12% |
+
+**store_type**, 3 segments fitted separately: beats one global fit in 1 of 2 decisions and does not separate in the rest, averaging +0.3 percent. Too small and too inconsistent to deploy on, and the direction is at least the right one, so this is the split to revisit if the members ever differ more by segment than they do here.
+
+**volume_quintile**, 5 segments fitted separately: beats one global fit in 1 of 2 decisions and does not separate in the rest, averaging +0.2 percent. Too small and too inconsistent to deploy on, and the direction is at least the right one, so this is the split to revisit if the members ever differ more by segment than they do here.
+
 ## Caveats
 
 - All three members run at default hyperparameters. A combination of tuned models could behave differently, though the tuning run found no gain to be had on the winner.
-- Weights are global, not per store. Per-store weights would be fitted on a fortieth as much data each, and the per-store selection this follows already showed how poorly a per-store choice made on one window transfers to the next.
+- Weights per individual store are still untested. Segments were tried because they sit between one global fit and a fit per store; a per-store fit would see a fortieth as much data again, and the per-store model selection this follows already showed how poorly a per-store choice made on one window transfers to the next.
 - Non-negative least squares fits the level as well as the shape, so its weights are not directly comparable with the inverse-error ones beyond their ordering.
 - A rule that puts most of its weight on the champion produces a tight interval, because the two are nearly the same predictor and resampling stores moves both together. Read the interval as the precision of a small difference, not as strong evidence of a large one.
 - Combination is scored only on folds with earlier folds behind them, since both the weights and the model being compared against have to come from somewhere.
