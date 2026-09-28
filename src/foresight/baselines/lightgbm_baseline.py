@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 from lightgbm import LGBMRegressor
 
-from foresight.baselines._runner import run_cli
+from foresight.baselines._runner import run_cli, write_predictions
 from foresight.config import HOLDOUT_DAYS, SAMPLE_STORES
 from foresight.features import (
     CATEGORICAL_COLS,
@@ -81,6 +81,7 @@ def run(
     data_dir: Path = DATA_DIR,
     train_end: pd.Timestamp | None = None,
     test_end: pd.Timestamp | None = None,
+    predictions_path: Path | None = None,
 ) -> dict:
     df = _load_data(data_dir, store_ids)
     train_df, test_df = _split(df, train_end=train_end, test_end=test_end)
@@ -90,6 +91,9 @@ def run(
 
     test_df = test_df.copy()
     test_df["y_pred"] = model.predict(test_df[FEATURE_COLS])
+
+    if predictions_path is not None:
+        write_predictions(test_df.rename(columns={"Sales": "y_true"}), predictions_path)
 
     per_store = {}
     for store_id, group in test_df.groupby("Store", observed=True):

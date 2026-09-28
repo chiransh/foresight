@@ -13,7 +13,7 @@ import numpy as np
 import pandas as pd
 from prophet import Prophet
 
-from foresight.baselines._runner import run_cli
+from foresight.baselines._runner import run_cli, write_predictions
 from foresight.config import HOLDOUT_DAYS, SAMPLE_STORES
 from foresight.metrics import error_totals, mape, smape, wape
 
@@ -34,6 +34,7 @@ def _fit_and_evaluate(
     df: pd.DataFrame,
     train_end: pd.Timestamp | None = None,
     test_end: pd.Timestamp | None = None,
+    predictions: list | None = None,
 ) -> dict | None:
     if train_end is None:
         train_end = df.Date.max() - pd.Timedelta(days=HOLDOUT_DAYS)
@@ -56,6 +57,18 @@ def _fit_and_evaluate(
     y_true = test_df.Sales.to_numpy()
     y_pred = forecast.yhat.to_numpy()
 
+    if predictions is not None:
+        predictions.append(
+            pd.DataFrame(
+                {
+                    "Store": test_df.Store.to_numpy(),
+                    "Date": test_df.Date.to_numpy(),
+                    "y_true": y_true,
+                    "y_pred": y_pred,
+                }
+            )
+        )
+
     return {
         "n_train_days": int(len(train_df)),
         "n_test_days": int(len(test_df)),
@@ -71,18 +84,28 @@ def run(
     data_dir: Path = DATA_DIR,
     train_end: pd.Timestamp | None = None,
     test_end: pd.Timestamp | None = None,
+    predictions_path: Path | None = None,
 ) -> dict:
     train = pd.read_csv(data_dir / "train.csv", parse_dates=["Date"], low_memory=False)
+
+    # Prophet fits one model per store, so its predictions arrive a store at a
+    # time and are concatenated once at the end.
+    predictions = [] if predictions_path is not None else None
 
     per_store = {}
     for store_id in store_ids:
         df = train[(train.Store == store_id) & (train.Open == 1)].sort_values("Date")
-        df = df[["Date", "Sales", "Promo"]].reset_index(drop=True)
+        df = df[["Store", "Date", "Sales", "Promo"]].reset_index(drop=True)
 
-        metrics = _fit_and_evaluate(df, train_end=train_end, test_end=test_end)
+        metrics = _fit_and_evaluate(
+            df, train_end=train_end, test_end=test_end, predictions=predictions
+        )
         print(f"store {store_id}: {metrics}", file=sys.stderr)
         if metrics is not None:
             per_store[store_id] = metrics
+
+    if predictions_path is not None:
+        write_predictions(pd.concat(predictions, ignore_index=True), predictions_path)
 
     overall = {
         metric: float(np.mean([m[metric] for m in per_store.values()]))

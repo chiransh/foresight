@@ -136,7 +136,22 @@ The breakdown above covers the served model family, so it says where that model 
 
 **Choosing on past windows is worse than not choosing.** Picking each store's model on earlier folds and applying it to the next one is a wash in the first decision and reliably worse in the second, at -1.0 percent with an interval of -2.1 to -0.3. Of the stores moved off LightGBM, 38 to 50 percent actually improved, so the past window is close to a coin flip about which model suits a store. Serving three models to pick between them would cost accuracy as well as complexity.
 
-Averaging the forecasts rather than choosing between them is a different question, and one this rig cannot answer: it keeps per-store errors, not the row-level predictions an average needs.
+### Combining the forecasts does work
+
+Selection failing does not settle combination, which is a different mechanism: an average can beat every model in it even when one of them is best everywhere, because the errors partly cancel. Answering it needs the row-level predictions the backtest discards, since the error of an averaged prediction cannot be recovered from per-store totals, so the baselines now emit them behind a flag. `foresight-combine` scores three weighting rules against the best single model, with every weight fitted on the folds before the one it is scored on ([evals/combination.md](evals/combination.md)).
+
+| Rule | Fold 2 | Fold 3 |
+|---|---|---|
+| lightgbm alone | 8.43 | 8.13 |
+| equal weights | 8.52 | 8.44 |
+| inverse error weights | 8.34 | 8.26 |
+| **non-negative least squares** | **8.33** | **7.92** |
+
+**Fitted weights win, fixed ones do not.** Equal weighting is reliably worse in both folds, by 2.5 percent of the champion's error on average, which is what should happen when two of the three members are 30 percent worse than the first. Inverse-error weighting wins one fold and loses the other, which is worse than no effect: weights that help in one period and hurt in the next cannot be deployed, because nothing says which period is coming.
+
+**Least squares beats the single model in both folds**, by 1.3 and 2.6 percent of its error, both intervals above zero, improving 86 and 78 percent of stores. It puts 0.95 and 0.84 of its weight on LightGBM and spends the rest mostly on Prophet, so it is best read as the champion with a small correction rather than as a committee. That is also why its interval is tight: a challenger that is nearly the champion has a small difference measured precisely, which is not the same as strong evidence of a large one.
+
+So the answer to the two questions is not the same. Choosing between the models per store costs accuracy; combining them with fitted weights buys about 2 percent of the error, for the cost of running three models instead of one.
 
 ## Backtesting design
 
@@ -215,6 +230,7 @@ foresight-backtest               # all three across folds, writes evals/comparis
 foresight-tune --stores all      # randomised search, scored only on untouched windows
 foresight-diagnose               # per-store error for the served model
 foresight-cross-model            # whether all three models fail on the same stores
+foresight-combine                # weighted combinations against the single best model
 
 foresight-train-model            # trains the quantile models the API serves
 uvicorn foresight.serving.app:app
@@ -255,7 +271,8 @@ Two tests guard the dashboard: panel datasource uids against the provisioned dat
 
 ## What I would change for production
 
-- **Combining the forecasts, not choosing between them.** Per-store selection was measured and does not work, but averaging or stacking the three models is untested and is where the remaining gain would be if there is one. It needs the row-level predictions the backtest currently discards, since an averaged prediction's error cannot be recovered from per-store totals.
+- **Serving the combination, not just scoring it.** The least-squares combination is measured and works, but the API serves a single LightGBM model. Serving it means running Prophet and NHITS in production, refitting the weights on a schedule, and quantile intervals for a weighted sum, which is a larger change than the 2 percent it buys may justify. That trade is the decision, and it should be made on a cost estimate rather than on the accuracy number alone.
+- **Weights per store or per segment.** The weights fitted here are global. Per-store weights would be fitted on a fortieth as much data each, and the per-store selection result suggests they would transfer badly, but a segment between the two, by store type or by volume quintile, is untested.
 - **A larger hyperparameter search, and one for the other two models.** Thirty random configurations did not beat the LightGBM defaults on held-out windows, but that rules out a modest search rather than tuning as such. Prophet and NHITS are still untuned, so the comparison remains one between default configurations.
 - **A challenger check that scales.** Each check trains a full challenger, which is cheap for LightGBM on 12 stores and would need a budget for a larger model or a tighter schedule. Twelve stores also make the bootstrap interval coarse, so smaller real gains go undetected; the full store set would resolve them.
 - **Distinguish holiday types.** The API maps every public holiday to Rossmann's generic code, but Easter and Christmas carry their own codes in the data and behave differently. Callers cannot say which kind a date is yet.
@@ -272,6 +289,7 @@ src/foresight/
   backtest.py          expanding-window folds, runs every model, writes comparison.md
   diagnostics.py       per-store error for the served model, joined to store characteristics
   cross_model.py       whether the three models fail on the same stores, and what that is worth
+  combination.py       weighting rules over all three models, fitted on earlier folds only
   tuning.py            randomised search on the training window only
   comparison.py        relative gain and the store-cluster bootstrap, shared
   tracking.py          MLflow logging shared by all baselines
@@ -288,7 +306,7 @@ notebooks/01-eda.ipynb seasonality, missingness, store hierarchy
 grafana/, prometheus/  provisioned dashboard and scrape config
 ```
 
-133 tests, covering leakage in the feature pipeline, the metric definitions, fold construction, drift maths, the retraining decision rule and its bootstrap, a replay that must never touch the served model, calendar inputs on the API, the Grafana dashboard's agreement with what the app exports, the serving path's dependency boundary, that the tuning search never sees the window it is scored on, that a per-store model choice is never scored on the window that picked it, and that the generated writeups' wording tracks the numbers they report.
+156 tests, covering leakage in the feature pipeline, the metric definitions, fold construction, drift maths, the retraining decision rule and its bootstrap, a replay that must never touch the served model, calendar inputs on the API, the Grafana dashboard's agreement with what the app exports, the serving path's dependency boundary, that the tuning search never sees the window it is scored on, that neither a per-store model choice nor a combination weight is ever scored on the window that produced it, and that the generated writeups' wording tracks the numbers they report.
 
 ## License
 

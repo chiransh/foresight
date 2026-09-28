@@ -73,6 +73,24 @@ Picking one model and discarding two invites the question of whether the losers 
 
 The gradient booster is also the better model on 1,039 of the 1,115 stores, so handing every store the model that suited it best, chosen with hindsight, would improve the chain-wide error by 0.04 of a percentage point. Doing it honestly, by choosing each store's model on earlier months and applying it to the next, was worse than not choosing at all: of the shops moved off the winning model, fewer than half improved. Serving three models to pick between them would cost accuracy as well as complexity.
 
+## What does help is combining them
+
+Choosing between the models per store is not the same as blending them, and the
+blend is where the gain turned out to be. Fitting a weighted average of the three
+on past months and applying it to the next one beat the single best model in both
+periods tested, cutting 1.3 and 2.6 percent of its error and improving four
+stores in five.
+
+The weights are worth reading: about 0.9 on the gradient booster and most of the
+rest on the classical model. It is the winning model with a small correction
+rather than a committee of three, and the honest way to describe the result is
+that combination buys roughly two percent of the error for the cost of running
+three models in production instead of one. Whether that trade is worth making is
+a decision about operating cost, not about accuracy.
+
+A fixed equal-weighted average, the version most people reach for first, was
+reliably worse than the single model in both periods.
+
 ## What the measurement changed
 
 An earlier version of this project's writeup claimed the neural model lost
@@ -107,7 +125,7 @@ have retrained, and the retrained model would have been 0.6 percent worse.
 ## Stack
 
 Python, LightGBM, Prophet, NeuralForecast, pandas, FastAPI, MLflow, Prometheus,
-Grafana, Docker Compose, PostgreSQL. 133 automated tests, run on every commit.
+Grafana, Docker Compose, PostgreSQL. 156 automated tests, run on every commit.
 
 ## For engineers
 
@@ -120,4 +138,6 @@ Grafana, Docker Compose, PostgreSQL. 133 automated tests, run on every commit.
 - [evals/store-diagnostics.md](evals/store-diagnostics.md) is the per-store breakdown.
 - [evals/cross-model.md](evals/cross-model.md) covers whether the three models fail on the same
   stores, and what a per-store choice between them would be worth.
+- [evals/combination.md](evals/combination.md) covers the weighted combinations and the leakage
+  rule they are scored under.
 - [evals/tuning.md](evals/tuning.md) covers the hyperparameter search and why it did not help.

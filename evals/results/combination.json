@@ -1,0 +1,127 @@
+{
+  "stores": "all",
+  "summary": {
+    "models": [
+      "prophet",
+      "lightgbm",
+      "nhits"
+    ],
+    "n_folds": 3,
+    "n_rows": 114799,
+    "n_stores": 1115,
+    "overall_model_wapes": {
+      "prophet": 11.244358465305657,
+      "lightgbm": 8.657957555874912,
+      "nhits": 12.223163937675563
+    },
+    "decisions": [
+      {
+        "fold": 2,
+        "fitted_on_folds": [
+          1
+        ],
+        "champion": "lightgbm",
+        "champion_wape": 8.432819981219506,
+        "n_rows": 37473,
+        "n_stores": 1115,
+        "model_wapes": {
+          "prophet": 10.824995267701288,
+          "lightgbm": 8.432819981219506,
+          "nhits": 11.943790521032845
+        },
+        "rules": {
+          "equal": {
+            "weights": {
+              "prophet": 0.3333,
+              "lightgbm": 0.3333,
+              "nhits": 0.3333
+            },
+            "wape": 8.519768119570903,
+            "relative_gain": -0.010310683560782078,
+            "ci_lower": -0.018726909465642816,
+            "ci_upper": -0.0015221138436532782,
+            "share_of_stores_better": 0.4896860986547085
+          },
+          "inverse_error": {
+            "weights": {
+              "prophet": 0.3156,
+              "lightgbm": 0.413,
+              "nhits": 0.2714
+            },
+            "wape": 8.33795532153466,
+            "relative_gain": 0.011249458650382406,
+            "ci_lower": 0.0038567878869234015,
+            "ci_upper": 0.018806824950453365,
+            "share_of_stores_better": 0.5668161434977579
+          },
+          "least_squares": {
+            "weights": {
+              "prophet": 0.0543,
+              "lightgbm": 0.9457,
+              "nhits": 0.0
+            },
+            "wape": 8.32690777200787,
+            "relative_gain": 0.012559524506334992,
+            "ci_lower": 0.01183047903331846,
+            "ci_upper": 0.013249883426721886,
+            "share_of_stores_better": 0.862780269058296
+          }
+        }
+      },
+      {
+        "fold": 3,
+        "fitted_on_folds": [
+          1,
+          2
+        ],
+        "champion": "lightgbm",
+        "champion_wape": 8.126476926498183,
+        "n_rows": 40282,
+        "n_stores": 1115,
+        "model_wapes": {
+          "prophet": 10.581635476703347,
+          "lightgbm": 8.126476926498183,
+          "nhits": 10.393155851953285
+        },
+        "rules": {
+          "equal": {
+            "weights": {
+              "prophet": 0.3333,
+              "lightgbm": 0.3333,
+              "nhits": 0.3333
+            },
+            "wape": 8.444033522715989,
+            "relative_gain": -0.03907678556033841,
+            "ci_lower": -0.04914346609984089,
+            "ci_upper": -0.029143576068134985,
+            "share_of_stores_better": 0.42690582959641254
+          },
+          "inverse_error": {
+            "weights": {
+              "prophet": 0.3147,
+              "lightgbm": 0.4082,
+              "nhits": 0.2771
+            },
+            "wape": 8.255034949691712,
+            "relative_gain": -0.015819650305575653,
+            "ci_lower": -0.024662726264833842,
+            "ci_upper": -0.006845569402884322,
+            "share_of_stores_better": 0.48789237668161434
+          },
+          "least_squares": {
+            "weights": {
+              "prophet": 0.1073,
+              "lightgbm": 0.8394,
+              "nhits": 0.0533
+            },
+            "wape": 7.91515866648332,
+            "relative_gain": 0.026003674399888096,
+            "ci_lower": 0.023582441109794558,
+            "ci_upper": 0.028475854337269617,
+            "share_of_stores_better": 0.7766816143497758
+          }
+        }
+      }
+    ]
+  }
+}

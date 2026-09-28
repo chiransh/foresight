@@ -67,6 +67,7 @@ def _run_model_fold(
     out_path: Path,
     stores: str = "sample",
     track: bool = True,
+    predictions_path: Path | None = None,
 ) -> dict:
     command = [
         sys.executable,
@@ -81,6 +82,8 @@ def _run_model_fold(
         "--out",
         str(out_path),
     ]
+    if predictions_path is not None:
+        command += ["--predictions", str(predictions_path)]
     if not track:
         command.append("--no-tracking")
     subprocess.run(command, check=True, capture_output=True, text=True)

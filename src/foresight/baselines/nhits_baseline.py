@@ -15,7 +15,7 @@ import pandas as pd
 from neuralforecast import NeuralForecast
 from neuralforecast.models import NHITS
 
-from foresight.baselines._runner import run_cli
+from foresight.baselines._runner import run_cli, write_predictions
 from foresight.config import HOLDOUT_DAYS, SAMPLE_STORES
 from foresight.metrics import error_totals, mape, smape, wape
 
@@ -60,6 +60,7 @@ def run(
     max_steps: int | None = None,
     val_size: int = 0,
     early_stop_patience: int = -1,
+    predictions_path: Path | None = None,
 ) -> dict:
     """The three override arguments exist to test the model fairly at scale.
 
@@ -97,6 +98,12 @@ def run(
 
     merged = test_df.merge(forecast, on=["unique_id", "ds"], how="left")
     merged = merged[merged.open == 1.0]  # same open-day-only evaluation as the other baselines
+
+    if predictions_path is not None:
+        write_predictions(
+            merged.rename(columns={"unique_id": "Store", "ds": "Date", "y": "y_true", "NHITS": "y_pred"}),
+            predictions_path,
+        )
 
     per_store = {}
     for store_id, group in merged.groupby("unique_id"):

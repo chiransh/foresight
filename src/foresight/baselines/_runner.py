@@ -20,6 +20,23 @@ from foresight.config import resolve_stores
 from foresight.tracking import log_run
 
 
+PREDICTION_COLUMNS = ["Store", "Date", "y_true", "y_pred"]
+
+
+def write_predictions(rows: pd.DataFrame, path: Path) -> None:
+    """Row-level predictions, in one shape for all three models.
+
+    Kept behind a flag rather than written always: the backtest only needs the
+    aggregates, and a full-store fold is 47,000 rows per model. What needs them
+    is forecast combination, where the error of an averaged prediction cannot be
+    recovered from per-store totals.
+    """
+    path.parent.mkdir(parents=True, exist_ok=True)
+    frame = rows[PREDICTION_COLUMNS].copy()
+    frame["Store"] = frame.Store.astype(int)
+    frame.to_parquet(path, index=False)
+
+
 def run_cli(
     run_fn: Callable, model_name: str, default_results_path: Path, params: dict | None = None
 ) -> None:
@@ -35,12 +52,17 @@ def run_cli(
         default="sample",
         help="sample for the pinned 12-store benchmark, all for every store, or a comma-separated list.",
     )
+    parser.add_argument(
+        "--predictions",
+        help="Also write row-level predictions here, as parquet. Needed for forecast combination.",
+    )
     args = parser.parse_args()
 
     results = run_fn(
         store_ids=resolve_stores(args.stores),
         train_end=pd.Timestamp(args.train_end) if args.train_end else None,
         test_end=pd.Timestamp(args.test_end) if args.test_end else None,
+        predictions_path=Path(args.predictions) if args.predictions else None,
     )
 
     out_path = Path(args.out) if args.out else default_results_path
